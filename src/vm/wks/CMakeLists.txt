@@ -1,4 +1,8 @@
+if (IS_64BIT_BUILD EQUAL 1)
 add_library(cee_wks ${VM_SOURCES_WKS} ${VM_SOURCES_WKS_AMD64_ASM})
+else (IS_64BIT_BUILD EQUAL 1)
+add_library(cee_wks ${VM_SOURCES_WKS} ${VM_SOURCES_WKS_X86_ASM})
+endif (IS_64BIT_BUILD EQUAL 1)
 
 if (WIN32)
 

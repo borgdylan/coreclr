@@ -2,18 +2,28 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 # WINTODO: Conditionalize the next check
 # AMD64 specific sources subdirectory
-set(AMD64_SOURCES_DIR amd64)
 
 # Needed due to the cmunged files being in the binary folders, the set(CMAKE_INCLUDE_CURRENT_DIR ON) is not enough
 include_directories(BEFORE ${CMAKE_CURRENT_SOURCE_DIR}) 
 
 include_directories(${CLR_DIR}/src/gc)
-include_directories(${AMD64_SOURCES_DIR})
+
+if (IS_64BIT_BUILD EQUAL 1)
+set(AMD64_SOURCES_DIR amd64)
 
 add_definitions(-D_TARGET_AMD64_=1)
 add_definitions(-DDBG_TARGET_64BIT=1)
 add_definitions(-DDBG_TARGET_AMD64=1)
 add_definitions(-DDBG_TARGET_WIN64=1)
+else (IS_64BIT_BUILD EQUAL 1)
+set(X86_SOURCES_DIR i386)
+
+add_definitions(-D_TARGET_X86_=1)
+add_definitions(-DDBG_TARGET_32BIT=1)
+add_definitions(-DDBG_TARGET_X86=1)
+endif (IS_64BIT_BUILD EQUAL 1)
+
+include_directories(${AMD64_SOURCES_DIR})
 
 add_definitions(-DFEATURE_LEAVE_RUNTIME_HOLDER=1)
 
@@ -327,6 +337,7 @@ set(VM_SOURCES_WKS_AMD64_ASM
 )
 
 else(WIN32)
+if (IS_64BIT_BUILD EQUAL 1)
 set(VM_SOURCES_WKS_AMD64_ASM
     ${AMD64_SOURCES_DIR}/jithelpers_fastwritebarriers.S
     ${AMD64_SOURCES_DIR}/jithelpers_slow.S
@@ -337,10 +348,23 @@ set(VM_SOURCES_WKS_AMD64_ASM
     ${AMD64_SOURCES_DIR}/theprestubamd64.S
     ${AMD64_SOURCES_DIR}/virtualcallstubamd64.S
 )
+else (IS_64BIT_BUILD EQUAL 1)
+set(VM_SOURCES_WKS_X86_ASM
+    #${X86_SOURCES_DIR}/jithelpers_fastwritebarriers.S
+    #${X86_SOURCES_DIR}/jithelpers_slow.S
+    #${X86_SOURCES_DIR}/jithelpers_fast.S
+    #${X86_SOURCES_DIR}/getstate.S
+    #${X86_SOURCES_DIR}/calldescrworkeramd64.S
+    #${X86_SOURCES_DIR}/unixasmhelpers.S
+    #${X86_SOURCES_DIR}/theprestubamd64.S
+    #${X86_SOURCES_DIR}/virtualcallstubamd64.S
+)
+endif (IS_64BIT_BUILD EQUAL 1)
 endif(WIN32)
 
-# AMD64 specific cpp sources
+# AMD64/x86 specific cpp sources
 
+if (IS_64BIT_BUILD EQUAL 1)
 set(VM_SOURCES_DAC_AND_WKS_AMD64
     ${AMD64_SOURCES_DIR}/cgenamd64.cpp
     ${AMD64_SOURCES_DIR}/excepamd64.cpp
@@ -355,14 +379,35 @@ set(VM_SOURCES_WKS_AMD64
     ${AMD64_SOURCES_DIR}/profiler.cpp
     jitinterfacegen.cpp
 )
+else (IS_64BIT_BUILD EQUAL 1)
+set(VM_SOURCES_DAC_AND_WKS_X86
+    ${X86_SOURCES_DIR}/cgenx86.cpp
+    ${X86_SOURCES_DIR}/excepx86.cpp
+    ${X86_SOURCES_DIR}/gmsx86.cpp
+    ${X86_SOURCES_DIR}/stublinkerx86.cpp
+)
+
+#The following files need to be ported to Linux
+#jithelpersx86.cpp does not yet exist
+set(VM_SOURCES_WKS_X86
+    ${X86_SOURCES_DIR}/jitinterfacex86.cpp
+    ${X86_SOURCES_DIR}/profiler.cpp
+    jitinterfacegen.cpp
+)
+endif (IS_64BIT_BUILD EQUAL 1)
 
 if(CLR_CMAKE_PLATFORM_UNIX)
-
+if (IS_64BIT_BUILD EQUAL 1)
 set(VM_SOURCES_WKS_AMD64
     ${VM_SOURCES_WKS_AMD64}
     ${AMD64_SOURCES_DIR}/unixstubs.cpp
 )
-
+else (IS_64BIT_BUILD EQUAL 1)
+set(VM_SOURCES_WKS_X86
+    ${VM_SOURCES_WKS_X86}
+    ${X86_SOURCES_DIR}/unixstubs.cpp
+)
+endif (IS_64BIT_BUILD EQUAL 1)
 endif(CLR_CMAKE_PLATFORM_UNIX)
 
 set(VM_SOURCES_DAC_AMD64
@@ -371,6 +416,13 @@ set(VM_SOURCES_DAC_AMD64
     exceptionhandling.cpp
 )
 
+set(VM_SOURCES_DAC_X86
+    gcinfodecoder.cpp
+    dbggcinfodecoder.cpp
+    exceptionhandling.cpp
+)
+
+if (IS_64BIT_BUILD EQUAL 1)
 set(VM_SOURCES_WKS 
     ${VM_SOURCES_WKS}
     ${VM_SOURCES_WKS_AMD64}
@@ -383,8 +435,23 @@ set(VM_SOURCES_DAC
     ${VM_SOURCES_DAC_AND_WKS_AMD64}
 )
 
-convert_to_absolute_path(VM_SOURCES_WKS ${VM_SOURCES_WKS})
 convert_to_absolute_path(VM_SOURCES_WKS_AMD64_ASM ${VM_SOURCES_WKS_AMD64_ASM})
+else (IS_64BIT_BUILD EQUAL 1)
+set(VM_SOURCES_WKS 
+    ${VM_SOURCES_WKS}
+    ${VM_SOURCES_WKS_X86}
+    ${VM_SOURCES_DAC_AND_WKS_X86}
+)
+
+set(VM_SOURCES_DAC
+    ${VM_SOURCES_DAC}
+    ${VM_SOURCES_DAC_X86}
+    ${VM_SOURCES_DAC_AND_WKS_X86}
+)
+convert_to_absolute_path(VM_SOURCES_WKS_X86_ASM ${VM_SOURCES_WKS_X86_ASM})
+endif (IS_64BIT_BUILD EQUAL 1)
+
+convert_to_absolute_path(VM_SOURCES_WKS ${VM_SOURCES_WKS})
 convert_to_absolute_path(VM_SOURCES_DAC ${VM_SOURCES_DAC})
     
 add_subdirectory(dac)

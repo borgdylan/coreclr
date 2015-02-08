@@ -122,7 +122,16 @@ class Exception;
 VOID DECLSPEC_NORETURN RealCOMPlusThrowOM();
 VOID DECLSPEC_NORETURN RealCOMPlusThrowSO();
 
-#include <excepcpu.h>
+#ifdef AMD64
+#include <amd64/excepcpu.h>
+#else
+	#ifdef X86
+	#include <i386/excepcpu.h>
+	#else
+	#include <excepcpu.h>
+	#endif
+#endif
+
 #include "stackprobe.h"
 
 
