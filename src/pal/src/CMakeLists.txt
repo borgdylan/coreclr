@@ -29,8 +29,13 @@ add_definitions(-DLP64COMPATIBLE=1)
 add_definitions(-DFEATURE_PAL=1)
 add_definitions(-DCORECLR=1)
 add_definitions(-DPIC=1)
+
+if (IS_64BIT_BUILD EQUAL 1)
 add_definitions(-DBIT64=1)
 add_definitions(-D_WIN64=1)
+else (IS_64BIT_BUILD EQUAL 1)
+add_definitions(-DBIT32=1)
+endif (IS_64BIT_BUILD EQUAL 1)
 
 add_compile_options(-fno-builtin)
 add_compile_options(-fPIC)
