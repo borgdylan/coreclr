@@ -3,9 +3,11 @@ set(MSCORDBI_SOURCES
 )  
 
 if(WIN32)
+    add_precompiled_header(stdafx.h stdafx.cpp MSCORDBI_SOURCES)
+    
     add_definitions(-DFX_VER_INTERNALNAME_STR=mscordbi.dll)
 
-    set(MSCORDBI_SOURCES ${MSCORDBI_SOURCES}
+    list(APPEND MSCORDBI_SOURCES
         Native.rc
     )
 
@@ -16,7 +18,7 @@ if(WIN32)
 
     preprocess_def_file(${DEF_SOURCES} ${CMAKE_CURRENT_BINARY_DIR}/mscordbi.def)
 
-    set(MSCORDBI_SOURCES ${MSCORDBI_SOURCES} ${CMAKE_CURRENT_BINARY_DIR}/mscordbi.def)
+    list(APPEND MSCORDBI_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/mscordbi.def)
 endif(WIN32)
 
 add_library(mscordbi SHARED
@@ -35,8 +37,7 @@ set(COREDBI_LIBRARIES
 ) 
 
 if(WIN32)
-    set(COREDBI_LIBRARIES
-        ${COREDBI_LIBRARIES}
+    list(APPEND COREDBI_LIBRARIES
         ipcmanager-staticcrt
         mdhotdata-staticcrt
         mdwinmd_dbi
@@ -53,8 +54,7 @@ if(WIN32)
     target_link_libraries(mscordbi ${COREDBI_LIBRARIES})
 
 elseif(CLR_CMAKE_PLATFORM_UNIX)
-    set(COREDBI_LIBRARIES
-        ${COREDBI_LIBRARIES}
+    list(APPEND COREDBI_LIBRARIES
         mdhotdata_full
         palrt
         CoreClrPal

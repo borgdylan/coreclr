@@ -1,3 +1,11 @@
+if (WIN32)
+  add_precompiled_header(common.h ../common.cpp VM_SOURCES_WKS)
+  # mscorlib.cpp does not compile with precompiled header file
+  set_source_files_properties(../mscorlib.cpp PROPERTIES COMPILE_FLAGS "/Y-") 
+  # .c file cannot use cpp precompiled header 
+  set_source_files_properties(../microsoft.comservices_i.c PROPERTIES COMPILE_FLAGS "/Y-") 
+endif (WIN32)
+
 if (IS_64BIT_BUILD EQUAL 1)
 add_library(cee_wks ${VM_SOURCES_WKS} ${VM_SOURCES_WKS_AMD64_ASM})
 else (IS_64BIT_BUILD EQUAL 1)
@@ -5,7 +13,6 @@ add_library(cee_wks ${VM_SOURCES_WKS} ${VM_SOURCES_WKS_X86_ASM})
 endif (IS_64BIT_BUILD EQUAL 1)
 
 if (WIN32)
-
 # Get the current list of definitions
 get_compile_definitions(DEFINITIONS)
 
@@ -13,21 +20,21 @@ get_directory_property(COMPILE_DEFINITIONS_LIST COMPILE_DEFINITIONS)
 
 # Extract the definitions for the ASM code. Since there is a bug in the cmake that prevents us from
 # using the generator expressions, we split the definitions into lists based on the configuration.
-foreach(DEFINITION ${COMPILE_DEFINITIONS_LIST})
+foreach(DEFINITION IN LISTS COMPILE_DEFINITIONS_LIST)
     if (${DEFINITION} MATCHES "^\\$<\\$<CONFIG:([^>]+)>:([^>]+)>$")
         # The entry contains generator expression, so insert the definition into a definitions list
         # corresponding to the config
         string(TOUPPER ${CMAKE_MATCH_1} CONFIG)
         set(ASM_DEFINITIONS_${CONFIG} ${ASM_DEFINITIONS_${CONFIG}} ${CMAKE_MATCH_2}) 
     else()
-        set(ASM_DEFINITIONS ${ASM_DEFINITIONS} ${DEFINITION})        
+        list(APPEND ASM_DEFINITIONS ${DEFINITION})        
     endif()
 endforeach()
 
 # Add defines for the ASM. Unfortunately setting it on the target is ignored for asm by the cmake, so we have
 # to set it on the sources.
 set_property(SOURCE ${VM_SOURCES_WKS_AMD64_ASM} PROPERTY COMPILE_DEFINITIONS ${ASM_DEFINITIONS})
-foreach(CONFIG ${CMAKE_CONFIGURATION_TYPES})
+foreach(CONFIG IN LISTS CMAKE_CONFIGURATION_TYPES)
     string(TOUPPER ${CONFIG} CONFIG)
     set_property(SOURCE ${VM_SOURCES_WKS_AMD64_ASM} PROPERTY COMPILE_DEFINITIONS_${CONFIG} ${ASM_DEFINITIONS_${CONFIG}})
 endforeach()

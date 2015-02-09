@@ -65,6 +65,9 @@ set( SOURCES
 )
 
 if( WIN32 )
+
+  add_precompiled_header(jitpch.h jitpch.cpp SOURCES)
+
   # Create .def file containing a list of exports preceeded by
   # 'EXPORTS'.  The file "ClrJit.exports" already contains the list, so we
   # massage it into the correct format here to create "ClrJit.exports.def".
@@ -97,7 +100,7 @@ if(CLR_CMAKE_PLATFORM_UNIX)
       ${SHARED_LIB_SOURCES}
     )
     add_dependencies(ClrJit CoreClrPal gcinfo)
-else(CLR_CMAKE_PLATFORM_UNIX)
+else()
     add_library(ClrJit
        ${SOURCES}
     )

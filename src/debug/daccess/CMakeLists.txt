@@ -36,17 +36,17 @@ set(DACCESS_SOURCES
 if(IS_64BIT_BUILD EQUAL 1)
   include_directories(amd64)
 
-  set(DACCESS_SOURCES
-    ${DACCESS_SOURCES}
+  list(APPEND DACCESS_SOURCES
     amd64/primitives.cpp
   )
-else(IS_64BIT_BUILD EQUAL 1)
-  set(DACCESS_SOURCES
-    ${DACCESS_SOURCES}
+else()
+  list(APPEND DACCESS_SOURCES
     i386/primitives.cpp
   )
 endif(IS_64BIT_BUILD EQUAL 1)
 
 convert_to_absolute_path(DACCESS_SOURCES ${DACCESS_SOURCES})
+
+add_precompiled_header(stdafx.h stdafx.cpp DACCESS_SOURCES)
 
 add_library(daccess ${DACCESS_SOURCES})

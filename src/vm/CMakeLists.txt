@@ -267,8 +267,7 @@ set(VM_SOURCES_DAC_AND_WKS_WIN32
     winrttypenameconverter.cpp
 )
 
-set(VM_SOURCES_WKS 
-    ${VM_SOURCES_WKS}
+list(APPEND VM_SOURCES_WKS 
     ${VM_SOURCES_DAC_AND_WKS_WIN32}
     marvin32.cpp # move out of win32 when FEATURE_RANDOMIZED_STRING_HASHING is enabled for linux
     # These should not be included for Linux
@@ -304,8 +303,7 @@ set(VM_SOURCES_WKS
     winrthelpers.cpp    
 )
 
-set(VM_SOURCES_DAC 
-    ${VM_SOURCES_DAC}
+list(APPEND VM_SOURCES_DAC 
     ${VM_SOURCES_DAC_AND_WKS_WIN32}
     # These should not be included for Linux
     clrprivbinderwinrt.cpp
@@ -335,6 +333,7 @@ set(VM_SOURCES_WKS_AMD64_ASM
     ${AMD64_SOURCES_DIR}/UMThunkStub.asm
     ${AMD64_SOURCES_DIR}/VirtualCallStubAMD64.asm
 )
+
 
 else(WIN32)
 if (IS_64BIT_BUILD EQUAL 1)
@@ -398,13 +397,11 @@ endif (IS_64BIT_BUILD EQUAL 1)
 
 if(CLR_CMAKE_PLATFORM_UNIX)
 if (IS_64BIT_BUILD EQUAL 1)
-set(VM_SOURCES_WKS_AMD64
-    ${VM_SOURCES_WKS_AMD64}
+list(APPEND VM_SOURCES_WKS_AMD64
     ${AMD64_SOURCES_DIR}/unixstubs.cpp
 )
 else (IS_64BIT_BUILD EQUAL 1)
-set(VM_SOURCES_WKS_X86
-    ${VM_SOURCES_WKS_X86}
+list(APPEND VM_SOURCES_WKS_X86
     ${X86_SOURCES_DIR}/unixstubs.cpp
 )
 endif (IS_64BIT_BUILD EQUAL 1)
@@ -423,28 +420,24 @@ set(VM_SOURCES_DAC_X86
 )
 
 if (IS_64BIT_BUILD EQUAL 1)
-set(VM_SOURCES_WKS 
-    ${VM_SOURCES_WKS}
+list(APPEND VM_SOURCES_WKS 
     ${VM_SOURCES_WKS_AMD64}
     ${VM_SOURCES_DAC_AND_WKS_AMD64}
 )
 
-set(VM_SOURCES_DAC
-    ${VM_SOURCES_DAC}
+list(APPEND VM_SOURCES_DAC
     ${VM_SOURCES_DAC_AMD64}
     ${VM_SOURCES_DAC_AND_WKS_AMD64}
 )
 
 convert_to_absolute_path(VM_SOURCES_WKS_AMD64_ASM ${VM_SOURCES_WKS_AMD64_ASM})
 else (IS_64BIT_BUILD EQUAL 1)
-set(VM_SOURCES_WKS 
-    ${VM_SOURCES_WKS}
+list(APPEND VM_SOURCES_WKS 
     ${VM_SOURCES_WKS_X86}
     ${VM_SOURCES_DAC_AND_WKS_X86}
 )
 
-set(VM_SOURCES_DAC
-    ${VM_SOURCES_DAC}
+list(APPEND VM_SOURCES_DAC
     ${VM_SOURCES_DAC_X86}
     ${VM_SOURCES_DAC_AND_WKS_X86}
 )
