@@ -4441,11 +4441,13 @@ enum {
 //
 // A function table entry is generated for each frame function.
 //
+#ifndef _X86_
 typedef struct _RUNTIME_FUNCTION {
     DWORD BeginAddress;
     DWORD EndAddress;
     DWORD UnwindData;
 } RUNTIME_FUNCTION, *PRUNTIME_FUNCTION;
+#endif
 
 PALIMPORT
 BOOL
