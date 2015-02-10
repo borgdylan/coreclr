@@ -3,8 +3,8 @@
 
 |   |Linux|Windows|
 |:-:|:-:|:-:|
-|Debug|[![Build status](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_linux_debug/badge/icon)](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_linux_debug/)|[![Build status](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_windows_debug/badge/icon)](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_windows_debug/)|
-|Release|[![Build status](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_linux_release/badge/icon)](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_linux_release/)|[![Build status](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_windows_release/badge/icon)](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_windows_release/)|
+|**Debug**|[![Build status](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_linux_debug/badge/icon)](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_linux_debug/)|[![Build status](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_windows_debug/badge/icon)](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_windows_debug/)|
+|**Release**|[![Build status](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_linux_release/badge/icon)](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_linux_release/)|[![Build status](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_windows_release/badge/icon)](http://dotnet-ci.cloudapp.net/job/dotnet_coreclr_windows_release/)|
 
 The coreclr repo contains the complete runtime implementation (called "CoreCLR") for [.NET Core](http://github.com/dotnet/core). It includes RyuJIT, the .NET GC, native interop and many other components. It builds and runs on Windows. You can 'watch' the repo to see Linux and Mac support being added over the next few months.
 
@@ -15,6 +15,7 @@ The [.NET Core Libraries][corefx] repo contains the base class libraries, which 
 ## Learn about CoreCLR
 Historically, new devs to the CLR team would be encouraged to read the "Book of the Runtime" (BotR) before making substative changes to the product. We have released the meaningful BotR chapters, for the same goal with new contributors.
 
+- [Book of the Runtime FAQ](https://github.com/dotnet/coreclr/blob/master/Documentation/botr-faq.md)
 - [Introduction to the Common Language Runtime](https://github.com/dotnet/coreclr/blob/master/Documentation/intro-to-clr.md)
 - [Mscorlib and Calling Into the Runtime](https://github.com/dotnet/coreclr/blob/master/Documentation/mscorlib.md)
 - More coming 
@@ -38,6 +39,10 @@ gist or starting a thread in the [.NET Foundation forums]. For broader topics, p
 [Developer Guide]: https://github.com/dotnet/coreclr/wiki/Developer-Guide
 
 [.NET Foundation forums]: http://forums.dotnetfoundation.org/
+
+Want to chat with other members of the CoreCLR community?
+
+[![Join the chat at https://gitter.im/dotnet/coreclr](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/dotnet/coreclr?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 ## CoreCLR Build Artifacts
 The build for this repo will produce the following artifacts:
