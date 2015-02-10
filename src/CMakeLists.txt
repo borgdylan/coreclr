@@ -3,7 +3,13 @@ include_directories("strongname/inc")
 include_directories("inc/winrt")
 
 include_directories("debug/inc")
+
+if (IS_64BIT_BUILD EQUAL 1)
 include_directories("debug/inc/amd64")
+else (IS_64BIT_BUILD EQUAL 1)
+include_directories("debug/inc/i386")
+endif (IS_64BIT_BUILD EQUAL 1)
+
 include_directories("debug/inc/dump")
 include_directories("md/inc")
 include_directories("classlibnative/bcltype")
