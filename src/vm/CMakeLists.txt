@@ -23,7 +23,7 @@ add_definitions(-DDBG_TARGET_32BIT=1)
 add_definitions(-DDBG_TARGET_X86=1)
 endif (IS_64BIT_BUILD EQUAL 1)
 
-include_directories(${AMD64_SOURCES_DIR})
+include_directories(${ARCH_SOURCES_DIR})
 
 add_definitions(-DFEATURE_LEAVE_RUNTIME_HOLDER=1)
 

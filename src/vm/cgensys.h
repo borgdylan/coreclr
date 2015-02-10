@@ -22,13 +22,7 @@ struct VASigCookie;
 struct CORCOMPILE_EXTERNAL_METHOD_THUNK;
 class ComPlusCallMethodDesc;
 
-#if defined(_TARGET_AMD64_)
-#include <amd64/cgencpu.h>
-#elif defined(_TARGET_X86_)
-#include <i386/cgencpu.h>
-#else
 #include <cgencpu.h>
-#endif
 
 #ifdef EnC_SUPPORTED
 void ResumeAtJit(PT_CONTEXT pContext, LPVOID oldFP);
