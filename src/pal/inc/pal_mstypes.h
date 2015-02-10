@@ -558,8 +558,13 @@ typedef LONG_PTR SSIZE_T, *PSSIZE_T;
 #endif
 
 #if defined(__APPLE_CC__) || defined(__LINUX__) 
+#if defined(_X86_)
+typedef unsigned int size_t;
+typedef int ptrdiff_t;
+#else
 typedef unsigned long size_t;
 typedef long ptrdiff_t;
+#endif
 #else
 typedef ULONG_PTR size_t;
 typedef LONG_PTR ptrdiff_t;
