@@ -338,6 +338,7 @@ set(VM_SOURCES_WKS_AMD64_ASM
 else(WIN32)
 if (IS_64BIT_BUILD EQUAL 1)
 set(VM_SOURCES_WKS_AMD64_ASM
+    ${AMD64_SOURCES_DIR}/crthelpers.S
     ${AMD64_SOURCES_DIR}/jithelpers_fastwritebarriers.S
     ${AMD64_SOURCES_DIR}/jithelpers_slow.S
     ${AMD64_SOURCES_DIR}/jithelpers_fast.S
