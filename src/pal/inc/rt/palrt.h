@@ -1659,7 +1659,8 @@ EXCEPTION_DISPOSITION
     PCONTEXT ContextRecord,
     PVOID DispatcherContext
     );
-    
+
+#ifndef _TARGET_X86_    
 typedef struct _DISPATCHER_CONTEXT {
     ULONG64 ControlPc;
     ULONG64 ImageBase;
@@ -1671,7 +1672,7 @@ typedef struct _DISPATCHER_CONTEXT {
     PVOID HandlerData;
     PUNWIND_HISTORY_TABLE HistoryTable;
 } DISPATCHER_CONTEXT, *PDISPATCHER_CONTEXT;
-
+#endif
 // #endif // !defined(_TARGET_MAC64)
 
 typedef DISPATCHER_CONTEXT *PDISPATCHER_CONTEXT;
