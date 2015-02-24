@@ -1597,6 +1597,7 @@ typedef struct _DEBUG_EVENT {
 // Define dynamic function table entry.
 //
 
+#if !defined(_TARGET_X86_)
 typedef
 PRUNTIME_FUNCTION
 GET_RUNTIME_FUNCTION_CALLBACK (
@@ -1617,6 +1618,7 @@ typedef OUT_OF_PROCESS_FUNCTION_TABLE_CALLBACK *POUT_OF_PROCESS_FUNCTION_TABLE_C
 
 #define OUT_OF_PROCESS_FUNCTION_TABLE_CALLBACK_EXPORT_NAME \
     "OutOfProcessFunctionTableCallback"
+#endif
 
 #if defined(FEATURE_PAL_SXS)
 
@@ -1635,6 +1637,7 @@ typedef OUT_OF_PROCESS_FUNCTION_TABLE_CALLBACK *POUT_OF_PROCESS_FUNCTION_TABLE_C
 
 #define UNWIND_HISTORY_TABLE_SIZE 12
 
+#if !defined(_TARGET_X86_)
 typedef struct _UNWIND_HISTORY_TABLE_ENTRY {
     DWORD64 ImageBase;
     PRUNTIME_FUNCTION FunctionEntry;
@@ -1650,6 +1653,7 @@ typedef struct _UNWIND_HISTORY_TABLE {
     DWORD64 HighAddress;
     UNWIND_HISTORY_TABLE_ENTRY Entry[UNWIND_HISTORY_TABLE_SIZE];
 } UNWIND_HISTORY_TABLE, *PUNWIND_HISTORY_TABLE;
+#endif
 
 typedef
 EXCEPTION_DISPOSITION
@@ -1675,7 +1679,9 @@ typedef struct _DISPATCHER_CONTEXT {
 #endif
 // #endif // !defined(_TARGET_MAC64)
 
+#if !defined(_TARGET_X86_)
 typedef DISPATCHER_CONTEXT *PDISPATCHER_CONTEXT;
+#endif
 
 #define ExceptionContinueSearch     EXCEPTION_CONTINUE_SEARCH
 #define ExceptionStackUnwind        EXCEPTION_EXECUTE_HANDLER
