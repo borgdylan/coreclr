@@ -53,6 +53,8 @@ Abstract:
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <limits.h>
+#include <string.h>
+#include <fcntl.h>
 
 #if HAVE_POLL
 #include <poll.h>
@@ -92,6 +94,7 @@ static PCRITICAL_SECTION init_critsec = NULL;
 
 char g_szCoreCLRPath[MAX_PATH] = { 0 };
 
+static int Initialize(int argc, const char *const argv[], DWORD flags);
 static BOOL INIT_IncreaseDescriptorLimit(void);
 static LPWSTR INIT_FormatCommandLine (CPalThread *pThread, int argc, const char * const *argv);
 static LPWSTR INIT_FindEXEPath(CPalThread *pThread, LPCSTR exe_name);
@@ -100,7 +103,7 @@ static LPWSTR INIT_FindEXEPath(CPalThread *pThread, LPCSTR exe_name);
 extern void PROCDumpThreadList(void);
 #endif
 
-char g_ExePath[MAX_PATH];
+char g_ExePath[MAX_PATH] = { 0 };
 
 #if defined(__APPLE__)
 static bool RunningNatively()
@@ -134,8 +137,48 @@ Return:
 int
 PALAPI
 PAL_Initialize(
-            int argc,
-            const char *const argv[])
+    int argc,
+    const char *const argv[])
+{
+    return Initialize(argc, argv, PAL_INITIALIZE);
+}
+
+/*++
+Function:
+  PAL_InitializeDLL
+
+Abstract:
+    Initializes the non-runtime DLLs/modules like the DAC and SOS.
+
+Return:
+  0 if successful
+  -1 if it failed
+
+--*/
+int
+PALAPI
+PAL_InitializeDLL()
+{
+    return Initialize(0, NULL, PAL_INITIALIZE_DLL);
+}
+
+/*++
+Function:
+  Initialize
+
+Abstract:
+  Common PAL initialization function.
+
+Return:
+  0 if successful
+  -1 if it failed
+
+--*/
+int
+Initialize(
+    int argc,
+    const char *const argv[],
+    DWORD flags)
 {
     PAL_ERROR palError = ERROR_GEN_FAILURE;
     CPalThread *pThread = NULL;
@@ -149,13 +192,14 @@ PAL_Initialize(
        case, since debug channels are not initialized yet. So in that case the
        ENTRY will be called after the DBG channels initialization */
     ENTRY_EXTERNAL("PAL_Initialize(argc = %d argv = %p)\n", argc, argv);
-    /*Firstly initiate a temporary lastError storage */
-    StartupLastError = ERROR_GEN_FAILURE;
+
+    /*Firstly initiate a lastError */
+    SetLastError(ERROR_GEN_FAILURE);
 
 #ifdef __APPLE__
     if (!RunningNatively())
     {
-        StartupLastError = ERROR_BAD_FORMAT;
+        SetLastError(ERROR_BAD_FORMAT);
         goto exit;
     }
 #endif // __APPLE__
@@ -224,30 +268,12 @@ PAL_Initialize(
         }
 #endif  // _DEBUG
     
-        /* Output the ENTRY here, since it doesn't work before initializing
-           debug channels */
-        ENTRY("PAL_Initialize(argc = %d argv = %p)\n", argc, argv);
-
-        if(argc<1 || argv==NULL)
-        {
-            ERROR("First-time initialization attempted with bad parameters!\n");
-            goto done;
-        }
-
         if (!INIT_IncreaseDescriptorLimit())
         {
             ERROR("Unable to increase the file descriptor limit!\n");
             // We can continue if this fails; we'll just have problems if
             // we use large numbers of threads or have many open files.
         }
-
-#if !HAVE_COREFOUNDATION || ENABLE_DOWNLEVEL_FOR_NLS
-        if( !CODEPAGEInit() )
-        {
-            ERROR( "Unable to initialize the locks or the codepage.\n" );
-            goto done;
-        }
-#endif // !HAVE_COREFOUNDATION || ENABLE_DOWNLEVEL_FOR_NLS
 
         /* initialize the shared memory infrastructure */
         if(!SHMInitialize())
@@ -344,8 +370,7 @@ PAL_Initialize(
         //
         // Initialize the synchronization manager
         //
-
-        g_pSynchronizationManager = 
+        g_pSynchronizationManager =
             CPalSynchMgrController::CreatePalSynchronizationManager(pThread);
 
         palError = ERROR_GEN_FAILURE;
@@ -356,43 +381,47 @@ PAL_Initialize(
             goto CLEANUP1c;
         }
 
-        /* build the command line */
-        command_line=INIT_FormatCommandLine(pThread, argc,argv);
-        if (NULL == command_line)
+        if (argc > 0 && argv != NULL)
         {
-            ERROR("Error building command line\n");
-            goto CLEANUP1d;
-        }
+            /* build the command line */
+            command_line = INIT_FormatCommandLine(pThread, argc, argv);
+            if (NULL == command_line)
+            {
+                ERROR("Error building command line\n");
+                goto CLEANUP1d;
+            }
 
-        /* find out the application's full path */
-        exe_path=INIT_FindEXEPath(pThread, argv[0]);
-        if (NULL == exe_path)
-        {
-            ERROR("Unable to find exe path\n");
-            goto CLEANUP1e;
-        }
+            /* find out the application's full path */
+            exe_path = INIT_FindEXEPath(pThread, argv[0]);
+            if (NULL == exe_path)
+            {
+                ERROR("Unable to find exe path\n");
+                goto CLEANUP1e;
+            }
 
-        if (!WideCharToMultiByte (CP_ACP, 0, exe_path, -1, g_ExePath,
-                                 sizeof (g_ExePath), NULL, NULL)) {
-            ERROR("Failed to store process executable path\n");
-            goto CLEANUP2;
-        }
+            if (!WideCharToMultiByte(CP_ACP, 0, exe_path, -1, g_ExePath,
+                sizeof(g_ExePath), NULL, NULL))
+            {
+                ERROR("Failed to store process executable path\n");
+                goto CLEANUP2;
+            }
 
-        if(NULL == command_line || NULL == exe_path)
-        {
-            ERROR("Failed to process command-line parameters!\n");
-            goto CLEANUP2;
-        }
+            if (NULL == command_line || NULL == exe_path)
+            {
+                ERROR("Failed to process command-line parameters!\n");
+                goto CLEANUP2;
+            }
 
 #ifdef PAL_PERF
-        // Initialize the Profiling structure
-        if(FALSE == PERFInitialize(command_line, exe_path)) 
-        {
-            ERROR("Performance profiling initial failed\n");
-            goto done;
-        }    
-        PERFAllocThreadInfo();
+            // Initialize the Profiling structure
+            if(FALSE == PERFInitialize(command_line, exe_path)) 
+            {
+                ERROR("Performance profiling initial failed\n");
+                goto done;
+            }    
+            PERFAllocThreadInfo();
 #endif
+        }
 
         //
         // Create the initial process and thread objects
@@ -407,26 +436,28 @@ PAL_Initialize(
         if (NO_ERROR != palError)
         {
             ERROR("Unable to create initial process and thread objects\n");
-            goto CLEANUP4;
+            goto CLEANUP2;
         }
         // CreateInitialProcessAndThreadObjects took ownership of this memory.
         command_line = NULL;
 
-        //
-        // Tell the synchronization manager to start its worker thread
-        //
-
-        palError = CPalSynchMgrController::StartWorker(pThread);
-        if (NO_ERROR != palError)
+        if (flags & PAL_INITIALIZE_SYNC_THREAD)
         {
-            ERROR("Synch manager failed to start worker thread\n");
-            goto CLEANUP5;
+            //
+            // Tell the synchronization manager to start its worker thread
+            //
+            palError = CPalSynchMgrController::StartWorker(pThread);
+            if (NO_ERROR != palError)
+            {
+                ERROR("Synch manager failed to start worker thread\n");
+                goto CLEANUP5;
+            }
         }
 
         palError = ERROR_GEN_FAILURE;
 
         /* initialize structured exception handling stuff (signals, etc) */
-        if (FALSE == SEHInitialize(pThread))
+        if (FALSE == SEHInitialize(pThread, flags))
         {
             ERROR("Unable to initialize SEH support\n");
             goto CLEANUP5;
@@ -506,8 +537,6 @@ CLEANUP6:
     SEHCleanup();
 CLEANUP5:
     PROCCleanupInitialProcess();
-CLEANUP4:
-    FMTMSG_FormatMessageCleanUp();
 CLEANUP2:
     InternalFree(pThread, exe_path);
 CLEANUP1e:
@@ -526,9 +555,6 @@ CLEANUP1a:
 CLEANUP1:
     SHMCleanup();
 CLEANUP0:
-#if !HAVE_COREFOUNDATION
-    CODEPAGECleanup();
-#endif // !HAVE_COREFOUNDATION
     ERROR("PAL_Initialize failed\n");
     SetLastError(palError);
 done:
@@ -630,16 +656,23 @@ PAL_InitializeCoreCLR(
     int result = PAL_Initialize(1, &szExePath);
 #endif // __APPLE__
     if (result != 0)
+    {
         return GetLastError();
+    }
 
     // Now that the PAL is initialized it's safe to call the initialization methods for the code that used to
     // be dynamically loaded libraries but is now statically linked into CoreCLR just like the PAL, i.e. the
     // PAL RT and mscorwks.
-    if (!LOADInitCoreCLRModules())
+    if (!LOADInitCoreCLRModules(g_szCoreCLRPath))
     {
         return ERROR_DLL_INIT_FAILED;
     }
-    
+
+    if (!InitializeFlushProcessWriteBuffers())
+    {
+        return ERROR_GEN_FAILURE;
+    }
+
     if (!fStayInPAL)
     {
         PAL_Leave(PAL_BoundaryTop);
@@ -659,8 +692,44 @@ BOOL
 PALAPI
 PAL_IsDebuggerPresent()
 {
-    // Always retun false for now.
+#if defined(__LINUX__)
+    BOOL debugger_present = FALSE;
+    char buf[2048];
+
+    int status_fd = open("/proc/self/status", O_RDONLY);
+    if (status_fd == -1)
+    {
+        return FALSE;
+    }
+    ssize_t num_read = read(status_fd, buf, sizeof(buf) - 1);
+
+    if (num_read > 0)
+    {
+        static const char TracerPid[] = "TracerPid:";
+        char *tracer_pid;
+
+        buf[num_read] = '\0';
+        tracer_pid = strstr(buf, TracerPid);
+        if (tracer_pid)
+        {
+            debugger_present = !!atoi(tracer_pid + sizeof(TracerPid) - 1);
+        }
+    }
+
+    return debugger_present;
+#elif defined(__APPLE__)
+    struct kinfo_proc info = {};
+    size_t size = sizeof(info);
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid() };
+    int ret = sysctl(mib, sizeof(mib)/sizeof(*mib), &info, &size, NULL, 0);
+
+    if (ret == 0)
+        return ((info.kp_proc.p_flag & P_TRACED) != 0);
+
     return FALSE;
+#else
+    return FALSE;
+#endif
 }
 
 /*++
@@ -773,9 +842,6 @@ PALCommonCleanup(PALCLEANUP_STEP step, BOOL full_cleanup)
             {
                 /* close primary handles of standard file objects */
                 FILECleanupStdHandles();
-                /* This unloads the palrt so, during its unloading, they
-                   can call any number of APIs, so we have to be active for it to work. */
-                FMTMSG_FormatMessageCleanUp();
                 VIRTUALCleanup();
                 /* SEH requires information from the process structure to work;
                    LOADFreeModules requires SEH to be functional when calling DllMain.
@@ -813,11 +879,7 @@ PALCommonCleanup(PALCLEANUP_STEP step, BOOL full_cleanup)
                 // MutexCleanup();
 
                 MiscCleanup();
-                TIMECleanUpTransitionDates();
 
-#if !HAVE_COREFOUNDATION
-                CODEPAGECleanup();
-#endif // !HAVE_COREFOUNDATION
                 TLSCleanup();
             }
 

@@ -20,14 +20,14 @@
 
 const int ChildThreadWaitTime = 4000;
 const int InterruptTime = 2000; 
-const int AcceptableDelta = 100;
+const DWORD AcceptableDelta = 300;
 
 void RunTest(BOOL AlertThread);
 VOID PALAPI APCFunc(ULONG_PTR dwParam);
 DWORD PALAPI WaiterProc(LPVOID lpParameter);
 void WorkerThread(void);
 
-DWORD ThreadWaitDelta;
+int ThreadWaitDelta;
 
 int __cdecl main( int argc, char **argv ) 
 {
@@ -51,7 +51,7 @@ int __cdecl main( int argc, char **argv )
      */
 
     RunTest(TRUE);
-    if ((ThreadWaitDelta - InterruptTime) > AcceptableDelta)
+    if (abs(ThreadWaitDelta - InterruptTime) > AcceptableDelta)
     {
         Fail("Expected thread to wait for %d ms (and get interrupted).\n"
             "Thread waited for %d ms! (Acceptable delta: %d)\n", 
@@ -64,7 +64,7 @@ int __cdecl main( int argc, char **argv )
      * it, if it is not in an alertable state.
      */
     RunTest(FALSE);
-    if ((ThreadWaitDelta - ChildThreadWaitTime) > AcceptableDelta)
+    if (abs(ThreadWaitDelta - ChildThreadWaitTime) > AcceptableDelta)
     {
         Fail("Expected thread to wait for %d ms (and not be interrupted).\n"
             "Thread waited for %d ms! (Acceptable delta: %d)\n", 
@@ -185,7 +185,7 @@ satisfying any threads that were waiting on the object.
         NewTickCount  = 0xFFFFFFFF;
     }
 
-    ThreadWaitDelta = NewTickCount - OldTickCount;
+    ThreadWaitDelta = (int)(NewTickCount - OldTickCount);
 
     ret = CloseHandle(hWaitThread);
     if (!ret)

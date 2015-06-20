@@ -4,6 +4,16 @@ cmake_minimum_required(VERSION 2.8.12)
 # Set the project name
 project(CoreCLR)
 
+# Enable @rpath support for shared libraries.
+set(MACOSX_RPATH ON)
+
+if(CMAKE_VERSION VERSION_EQUAL 3.0 OR CMAKE_VERSION VERSION_GREATER 3.0)
+    cmake_policy(SET CMP0042 NEW)
+endif()
+
+set(CLR_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+set(VM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/vm)
+
 if(CMAKE_SYSTEM_NAME STREQUAL Linux)
     set(CLR_CMAKE_PLATFORM_UNIX 1)
     set(CLR_CMAKE_PLATFORM_LINUX 1)
@@ -25,10 +35,34 @@ if(CMAKE_SYSTEM_NAME STREQUAL Darwin)
     set(CMAKE_ASM_COMPILE_OBJECT "${CMAKE_C_COMPILER} <FLAGS> <DEFINES> -o <OBJECT> -c <SOURCE>")
 endif(CMAKE_SYSTEM_NAME STREQUAL Darwin)
 
+if(CMAKE_SYSTEM_NAME STREQUAL FreeBSD)
+	set(CLR_CMAKE_PLATFORM_UNIX 1)
+	set(CLR_CMAKE_PLATFORM_UNIX_TARGET_AMD64 1)
+	set(CLR_CMAKE_PLATFORM_FREEBSD 1)
+endif(CMAKE_SYSTEM_NAME STREQUAL FreeBSD)
+
+if(CMAKE_SYSTEM_NAME STREQUAL OpenBSD)
+	set(CLR_CMAKE_PLATFORM_UNIX 1)
+	set(CLR_CMAKE_PLATFORM_UNIX_TARGET_AMD64 1)
+	set(CLR_CMAKE_PLATFORM_OPENBSD 1)
+endif(CMAKE_SYSTEM_NAME STREQUAL OpenBSD)
+
+if(CMAKE_SYSTEM_NAME STREQUAL NetBSD)
+	set(CLR_CMAKE_PLATFORM_UNIX 1)
+	set(CLR_CMAKE_PLATFORM_UNIX_TARGET_AMD64 1)
+	set(CLR_CMAKE_PLATFORM_NETBSD 1)
+endif(CMAKE_SYSTEM_NAME STREQUAL NetBSD)
+
 if(WIN32)
     enable_language(ASM_MASM)
 else()
     enable_language(ASM)
+
+    # Ensure that awk is present
+    find_program(AWK awk)
+    if (AWK STREQUAL "AWK-NOTFOUND")
+        message(FATAL_ERROR "AWK not found")
+    endif()
 endif(WIN32)
 
 # Build a list of compiler definitions by putting -D in front of each define.
@@ -78,6 +112,24 @@ function(preprocess_def_file inputFilename outputFilename)
     COMMAND ${CMAKE_CXX_COMPILER} /P /EP /TC ${PREPROCESS_DEFINITIONS}  /Fi${outputFilename}  ${inputFilename}
     DEPENDS ${inputFilename}
     COMMENT "Preprocessing ${inputFilename}"
+  )
+  set_source_files_properties(${outputFilename}
+                              PROPERTIES GENERATED TRUE)
+endfunction()
+
+function(generate_exports_file inputFilename outputFilename)
+
+  if(CMAKE_SYSTEM_NAME STREQUAL Darwin)
+    set(AWK_SCRIPT generateexportedsymbols.awk)
+  else()
+    set(AWK_SCRIPT generateversionscript.awk)
+  endif(CMAKE_SYSTEM_NAME STREQUAL Darwin)
+
+  add_custom_command(
+    OUTPUT ${outputFilename}
+    COMMAND ${AWK} -f ${CMAKE_SOURCE_DIR}/${AWK_SCRIPT} ${inputFilename} >${outputFilename}
+    DEPENDS ${inputFilename}
+    COMMENT "Generating exports file ${outputFilename}"
   )
   set_source_files_properties(${outputFilename}
                               PROPERTIES GENERATED TRUE)
@@ -134,9 +186,17 @@ elseif (CLR_CMAKE_PLATFORM_UNIX)
 endif(WIN32)
 
 if(CLR_CMAKE_PLATFORM_UNIX)
+    add_subdirectory(src/ToolBox/SOS/lldbplugin)
     add_subdirectory(src/pal)
     add_subdirectory(src/coreclr/hosts/unixcorerun)
+    add_subdirectory(src/corefx)
+    add_subdirectory(src/coreclr/hosts/unixcoreconsole)
 endif(CLR_CMAKE_PLATFORM_UNIX)
+
+if(CLR_CMAKE_PLATFORM_DARWIN)
+    add_subdirectory(src/coreclr/hosts/osxbundlerun)
+endif(CLR_CMAKE_PLATFORM_DARWIN)
+
 
 # Add this subdir. We install the headers for the jit.
 
@@ -158,13 +218,17 @@ if (WIN32)
   
 elseif (CLR_CMAKE_PLATFORM_UNIX)  
   # Set flag to indicate if this will be a 64bit build
-  if(CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64)
+  # CMAKE_SYSTEM_PROCESSOR returns the value of `uname -p`.
+  # For the AMD/Intel 64bit architecure two different strings are common.
+  # Linux and Darwin identify it as "x86_64" while FreeBSD uses the
+  # "amd64" string. Accept either of the two here.
+  if(CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL amd64)
     set(IS_64BIT_BUILD 1)
-  else (CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64)
-  	if(CMAKE_SYSTEM_PROCESSOR STREQUAL i686)
+  else (CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL amd64)
+	if(CMAKE_SYSTEM_PROCESSOR STREQUAL i686)
       set(IS_64BIT_BUILD 0)
-  	endif(CMAKE_SYSTEM_PROCESSOR STREQUAL i686)  
-  endif (CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64)
+  	endif(CMAKE_SYSTEM_PROCESSOR STREQUAL i686)
+  endif (CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL amd64)
   
   add_definitions(-DFEATURE_IMPLICIT_TLS)
 endif(WIN32)
@@ -177,12 +241,10 @@ if (WIN32)
 # The following options are set by the razzle build
 add_compile_options(/TP) # compile all files as C++
 add_compile_options(/FIWarningControl.h) # force include of WarningControl.h
-add_compile_options(/Zi) # enable debugging information
 add_compile_options(/d2Zi+) # make optimized builds debugging easier
 add_compile_options(/nologo) # Suppress Startup Banner
 add_compile_options(/W3) # set warning level to 3
 add_compile_options(/WX) # treat warnings as errors
-add_compile_options(/O1) # minimize space
 add_compile_options(/Oi) # enable intrinsics
 add_compile_options(/Oy-) # disable suppressing of the creation of frame pointers on the call stack for quicker function calls
 add_compile_options(/U_MT) # undefine the predefined _MT macro
@@ -201,6 +263,10 @@ add_compile_options(/MP) # Build with Multiple Processes (number of processes eq
 add_compile_options(/GS) # Buffer Security Check
 add_compile_options(/Zm200) # Specify Precompiled Header Memory Allocation Limit of 150MB
 add_compile_options(/wd4960 /wd4961 /wd4603 /wd4627 /wd4838 /wd4456 /wd4457 /wd4458 /wd4459 /wd4091 /we4640)
+add_compile_options(/O1) # minimize space
+add_compile_options(/Zi) # enable debugging information
+
+add_compile_options($<$<OR:$<CONFIG:Release>,$<CONFIG:Relwithdebinfo>>:/GL>)
 
 if (IS_64BIT_BUILD EQUAL 1)
 # The generator expression in the following command means that the /homeparams option is added only for debug builds
@@ -213,7 +279,6 @@ set(CMAKE_CXX_STANDARD_LIBRARIES "") # do not link against standard win32 libs i
 # Linker flags
 #
 # Disable the following line for UNIX altjit on Windows
-set(CMAKE_SHARED_LINKER_FLAGS "/NODEFAULTLIB") #do not use default libraries when resolving external references
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /MANIFEST:NO") #Do not create Side-by-Side Assembly Manifest
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /SUBSYSTEM:WINDOWS,6.00") #windows subsystem
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /LARGEADDRESSAWARE") # can handle addresses larger than 2 gigabytes
@@ -234,9 +299,14 @@ set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "/NOVCFEATURE")
 
 # Release build specific flags
 set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /LTCG")
+set(CMAKE_STATIC_LINKER_FLAGS_RELEASE "${CMAKE_STATIC_LINKER_FLAGS_RELEASE} /LTCG")
+set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG")
 
 # ReleaseWithDebugInfo build specific flags
 set(CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO} /LTCG")
+set(CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO} /LTCG")
+set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} /LTCG")
+
 endif (WIN32)
 
 endif (OVERRIDE_CMAKE_CXX_FLAGS)
@@ -247,52 +317,37 @@ add_definitions(-DDISABLE_CONTRACTS)
 # after hitting just about 20 errors.
 #add_compile_options(-ferror-limit=4096)
 
+# All warnings that are not explicitly disabled are reported as errors
+add_compile_options(-Werror)
+
 # Disabled warnings
-add_compile_options(-Wno-reorder)
-add_compile_options(-Wno-ignored-attributes)
-add_compile_options(-Wno-unknown-pragmas)
 add_compile_options(-Wno-unused-private-field)
-add_compile_options(-Wno-new-returns-null)
-add_compile_options(-Wno-dangling-else)
-add_compile_options(-Wno-implicit-exception-spec-mismatch)
-add_compile_options(-Wno-deprecated-register)
-add_compile_options(-Wno-parentheses)
-add_compile_options(-Wno-overloaded-virtual)
 add_compile_options(-Wno-unused-variable)
-add_compile_options(-Wno-missing-declarations)
-add_compile_options(-Wno-switch)
-add_compile_options(-Wno-extern-initializer)
+# Explicit constructor calls are not supported by clang (this->ClassName::ClassName())
 add_compile_options(-Wno-microsoft)
-add_compile_options(-Wno-mismatched-tags)
-add_compile_options(-Wno-ignored-qualifiers)
-add_compile_options(-Wno-tautological-constant-out-of-range-compare)
-add_compile_options(-Wno-c++11-compat-deprecated-writable-strings)
-add_compile_options(-Wno-unneeded-internal-declaration)
+# This warning is caused by comparing 'this' to NULL
 add_compile_options(-Wno-tautological-compare)
+# There are constants of type BOOL used in a condition. But BOOL is defined as int
+# and so the compiler thinks that there is a mistake.
 add_compile_options(-Wno-constant-logical-operand)
-add_compile_options(-Wno-unused-function)
-add_compile_options(-Wno-extra-tokens)
-add_compile_options(-Wno-self-assign)
-add_compile_options(-Wno-bitfield-constant-conversion)
-add_compile_options(-Wno-unused-value)
 
 add_compile_options(-Wno-unknown-warning-option)
 
 #These seem to indicate real issues
 add_compile_options(-Wno-invalid-offsetof)
-add_compile_options(-Wno-return-type)
-add_compile_options(-Wno-dynamic-class-memaccess)
-add_compile_options(-Wno-int-to-pointer-cast)
-add_compile_options(-Wno-delete-non-virtual-dtor)
-add_compile_options(-Wno-enum-compare)
+# The following warning indicates that an attribute __attribute__((__ms_struct__)) was applied 
+# to a struct or a class that has virtual members or a base class. In that case, clang
+# may not generate the same object layout as MSVC.
+add_compile_options(-Wno-incompatible-ms-struct)
 
 # The -fms-extensions enable the stuff like __if_exists, __declspec(uuid()), etc.
 add_compile_options(-fms-extensions )
 #-fms-compatibility      Enable full Microsoft Visual C++ compatibility
 #-fms-extensions         Accept some non-standard constructs supported by the Microsoft compiler
-# The newer version of clang hits this seemly benign error that this disables.
-add_compile_options(-Wno-incompatible-ms-struct)
+
 endif(CLR_CMAKE_PLATFORM_UNIX)
+
+add_subdirectory(src/debug/debug-pal)
 
 # Include directory directives
 
@@ -302,6 +357,7 @@ include_directories("src/pal/prebuilt/inc")
 if (CLR_CMAKE_PLATFORM_UNIX)
   include_directories("src/pal/inc")
   include_directories("src/pal/inc/rt")
+  include_directories("src/pal/inc/rt/cpp")
   include_directories("src/pal/src/safecrt")
 endif (CLR_CMAKE_PLATFORM_UNIX)
 
@@ -321,8 +377,9 @@ endif (WIN32)
 if (CLR_CMAKE_PLATFORM_UNIX)
   add_definitions(-DPLATFORM_UNIX=1)
   add_definitions(-DFEATURE_PAL_SXS)
+  add_definitions(-DFEATURE_COREFX_GLOBALIZATION)
 
-  if(CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64)
+  if(IS_64BIT_BUILD)
     add_definitions(-DBIT64=1)
     add_definitions(-DFEATURE_PAL)
   else (CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64)
@@ -353,6 +410,9 @@ if (CLR_CMAKE_PLATFORM_UNIX)
     message("Detected OSX x86_64")
     add_definitions(-D_XOPEN_SOURCE)
   endif(CLR_CMAKE_PLATFORM_DARWIN)
+  if(CLR_CMAKE_PLATFORM_FREEBSD)
+    message("Detected FreeBSD amd64")
+  endif(CLR_CMAKE_PLATFORM_FREEBSD)
 endif(CLR_CMAKE_PLATFORM_UNIX)
 
 
@@ -390,7 +450,7 @@ else ()
 endif (IS_64BIT_BUILD EQUAL 1)
 
 if(WIN32)
-add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 endif(WIN32)
 add_definitions(-DNTMAKEENV)
 add_definitions(-D_BLD_CLR)
@@ -414,17 +474,19 @@ if (CLR_CMAKE_PLATFORM_UNIX)
 endif(CLR_CMAKE_PLATFORM_UNIX)
 add_definitions(-DFEATURE_ASYNC_IO)
 add_definitions(-DFEATURE_BCL_FORMATTING)
+add_definitions(-DFEATURE_COLLECTIBLE_TYPES)
+
 if(WIN32)
     add_definitions(-DFEATURE_CLASSIC_COMINTEROP)
-endif(WIN32)
-add_definitions(-DFEATURE_COLLECTIBLE_TYPES)
-if(WIN32)
     add_definitions(-DFEATURE_APPX)
     add_definitions(-DFEATURE_COMINTEROP)
     add_definitions(-DFEATURE_COMINTEROP_APARTMENT_SUPPORT)
     add_definitions(-DFEATURE_COMINTEROP_UNMANAGED_ACTIVATION)
     add_definitions(-DFEATURE_COMINTEROP_WINRT_MANAGED_ACTIVATION)
 endif(WIN32)
+
+add_definitions(-DFEATURE_ICASTABLE)
+
 add_definitions(-DFEATURE_CORECLR)
 add_definitions(-DFEATURE_CORESYSTEM)
 add_definitions(-DFEATURE_CORRUPTING_EXCEPTIONS)
@@ -466,6 +528,7 @@ add_definitions(-DFEATURE_PREJIT)
 if(WIN32)
     add_definitions(-DFEATURE_RANDOMIZED_STRING_HASHING)
 endif(WIN32)
+add_definitions(-DFEATURE_READYTORUN)
 add_definitions(-DFEATURE_STANDALONE_SN)
 add_definitions(-DFEATURE_STRONGNAME_DELAY_SIGNING_ALLOWED)
 add_definitions(-DFEATURE_STRONGNAME_MIGRATION)
@@ -473,6 +536,9 @@ if(WIN32)
     add_definitions(-DFEATURE_STRONGNAME_TESTKEY_ALLOWED)
 endif(WIN32)
 add_definitions(-DFEATURE_SVR_GC)
+if(CLR_CMAKE_PLATFORM_LINUX)
+    add_definitions(-DFEATURE_PERFMAP)
+endif(CLR_CMAKE_PLATFORM_LINUX)
 add_definitions(-DFEATURE_SYNTHETIC_CULTURES)
 add_definitions(-DFEATURE_VERSIONING)
 if(WIN32)
@@ -489,6 +555,11 @@ endif(WIN32)
 add_definitions(-DFEATURE_MULTICOREJIT)
 add_definitions(-DFEATURE_USE_ASM_GC_WRITE_BARRIERS)
 add_definitions(-DFEATURE_SYMDIFF)
+
+if(CLR_CMAKE_PLATFORM_UNIX)
+    add_definitions(-DFEATURE_DBGIPC_TRANSPORT_DI)
+    add_definitions(-DFEATURE_DBGIPC_TRANSPORT_VM)
+endif(CLR_CMAKE_PLATFORM_UNIX)
 
 if (IS_64BIT_BUILD EQUAL 1)
 add_definitions(-D_AMD64_)
@@ -522,8 +593,5 @@ if (IS_64BIT_BUILD EQUAL 1)
 else ()
   set(ARCH_SOURCES_DIR i386)
 endif (IS_64BIT_BUILD EQUAL 1)
-
-set(CLR_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-set(VM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/vm)
 
 add_subdirectory(src)

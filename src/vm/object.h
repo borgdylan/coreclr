@@ -370,7 +370,7 @@ class Object
         return (psb && psb->IsAppDomainAgile());
     }
 
-    BOOL Object::IsCheckedForAppDomainAgile()
+    BOOL IsCheckedForAppDomainAgile()
     {
         WRAPPER_NO_CONTRACT;
 
@@ -378,7 +378,7 @@ class Object
         return (psb && psb->IsCheckedForAppDomainAgile());
     }
 
-    void Object::SetIsCheckedForAppDomainAgile()
+    void SetIsCheckedForAppDomainAgile()
     {
         WRAPPER_NO_CONTRACT;
 
@@ -747,6 +747,7 @@ class ArrayBase : public Object
     friend OBJECTREF FastAllocatePrimitiveArray(MethodTable* arrayType, DWORD cElements, BOOL bAllocateInLargeHeap);
     friend class JIT_TrialAlloc;
     friend class CheckAsmOffsets;
+    friend struct _DacGlobals;
 
 private:
     // This MUST be the first field, so that it directly follows Object.  This is because
@@ -3678,8 +3679,8 @@ class SafeBuffer : SafeHandle
   public:
     static FCDECL1(UINT, SizeOfType, ReflectClassBaseObject* typeUNSAFE);
     static FCDECL1(UINT, AlignedSizeOfType, ReflectClassBaseObject* typeUNSAFE);
-    static FCDECL3(void, PtrToStructure, BYTE* ptr, TypedByRef structure, UINT32 sizeofT);
-    static FCDECL3(void, StructureToPtr, TypedByRef structure, BYTE* ptr, UINT32 sizeofT);
+    static FCDECL3(void, PtrToStructure, BYTE* ptr, FC_TypedByRef structure, UINT32 sizeofT);
+    static FCDECL3(void, StructureToPtr, FC_TypedByRef structure, BYTE* ptr, UINT32 sizeofT);
 };
 
 #ifdef USE_CHECKED_OBJECTREFS

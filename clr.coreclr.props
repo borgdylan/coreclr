@@ -60,6 +60,7 @@
     <FeatureClassicCominterop>true</FeatureClassicCominterop>
     <FeatureLegacySurface>true</FeatureLegacySurface>
     <FeatureCominterop>true</FeatureCominterop>
+    <FeatureICastable>true</FeatureICastable>
     <FeatureCominteropUnmanagedActivation>true</FeatureCominteropUnmanagedActivation>
     <FeatureCominteropWinRTManagedActivation>true</FeatureCominteropWinRTManagedActivation>
     <FeatureCrypto>true</FeatureCrypto>
@@ -93,10 +94,12 @@
     <FeatureSvrGc Condition="'$(TargetArch)' != 'arm'">true</FeatureSvrGc>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(OS)' == 'Unix'">
+  <PropertyGroup Condition="'$(TargetsUnix)' == 'true'">
     <FeaturePal>true</FeaturePal>
 
     <FeatureStubsAsIL>true</FeatureStubsAsIL>
+
+    <ProfilingSupportedBuild>false</ProfilingSupportedBuild>
 
     <!-- UNIXTODO Enable randomized string hashing -->
     <FeatureRandomizedStringHashing>false</FeatureRandomizedStringHashing>

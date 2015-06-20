@@ -39,20 +39,26 @@ Abstract:
 
 #if HAVE_LIBUNWIND_H
 #if UNWIND_CONTEXT_IS_UCONTEXT_T
+
+#if defined(_AMD64_)
+#define ASSIGN_UNWIND_REGS \
+    ASSIGN_REG(Rip)        \
+    ASSIGN_REG(Rsp)        \
+    ASSIGN_REG(Rbp)        \
+    ASSIGN_REG(Rbx)        \
+    ASSIGN_REG(R12)        \
+    ASSIGN_REG(R13)        \
+    ASSIGN_REG(R14)        \
+    ASSIGN_REG(R15)     
+#else // _AMD64_
+#error unsupported architecture
+#endif // _AMD64_
+
 static void WinContextToUnwindContext(CONTEXT *winContext, unw_context_t *unwContext)
 {
-#if defined(_AMD64_)
-    unwContext->uc_mcontext.gregs[REG_RIP] = winContext->Rip;
-    unwContext->uc_mcontext.gregs[REG_RSP] = winContext->Rsp;
-    unwContext->uc_mcontext.gregs[REG_RBP] = winContext->Rbp;
-    unwContext->uc_mcontext.gregs[REG_RBX] = winContext->Rbx;
-    unwContext->uc_mcontext.gregs[REG_R12] = winContext->R12;
-    unwContext->uc_mcontext.gregs[REG_R13] = winContext->R13;
-    unwContext->uc_mcontext.gregs[REG_R14] = winContext->R14;
-    unwContext->uc_mcontext.gregs[REG_R15] = winContext->R15;
-#else
-#error unsupported architecture
-#endif
+#define ASSIGN_REG(reg) MCREG_##reg(unwContext->uc_mcontext) = winContext->reg;
+    ASSIGN_UNWIND_REGS
+#undef ASSIGN_REG
 }
 #else
 static void WinContextToUnwindCursor(CONTEXT *winContext, unw_cursor_t *cursor)
@@ -88,29 +94,33 @@ static void UnwindContextToWinContext(unw_cursor_t *cursor, CONTEXT *winContext)
 #endif
 }
 
-static void GetContextPointer(unw_cursor_t *cursor, int reg, PDWORD64 *contextPointer)
+static void GetContextPointer(unw_cursor_t *cursor, unw_context_t *unwContext, int reg, PDWORD64 *contextPointer)
 {
 #if defined(__APPLE__)
-    //OSXTODO
+    // Returning NULL indicates that we don't have context pointers available
+    *contextPointer = NULL;
 #else
     unw_save_loc_t saveLoc;
     unw_get_save_loc(cursor, reg, &saveLoc);
     if (saveLoc.type == UNW_SLT_MEMORY)
     {
-        *contextPointer = (PDWORD64)saveLoc.u.addr;
+        PDWORD64 pLoc = (PDWORD64)saveLoc.u.addr;
+        // Filter out fake save locations that point to unwContext 
+        if ((pLoc < (PDWORD64)unwContext) || ((PDWORD64)(unwContext + 1) <= pLoc))
+            *contextPointer = (PDWORD64)saveLoc.u.addr;
     }
 #endif
 }
 
-static void GetContextPointers(unw_cursor_t *cursor, KNONVOLATILE_CONTEXT_POINTERS *contextPointers)
+static void GetContextPointers(unw_cursor_t *cursor, unw_context_t *unwContext, KNONVOLATILE_CONTEXT_POINTERS *contextPointers)
 {
 #if defined(_AMD64_)
-    GetContextPointer(cursor, UNW_X86_64_RBP, &contextPointers->Rbp);
-    GetContextPointer(cursor, UNW_X86_64_RBX, &contextPointers->Rbx);
-    GetContextPointer(cursor, UNW_X86_64_R12, &contextPointers->R12);
-    GetContextPointer(cursor, UNW_X86_64_R13, &contextPointers->R13);
-    GetContextPointer(cursor, UNW_X86_64_R14, &contextPointers->R14);
-    GetContextPointer(cursor, UNW_X86_64_R15, &contextPointers->R15);
+    GetContextPointer(cursor, unwContext, UNW_X86_64_RBP, &contextPointers->Rbp);
+    GetContextPointer(cursor, unwContext, UNW_X86_64_RBX, &contextPointers->Rbx);
+    GetContextPointer(cursor, unwContext, UNW_X86_64_R12, &contextPointers->R12);
+    GetContextPointer(cursor, unwContext, UNW_X86_64_R13, &contextPointers->R13);
+    GetContextPointer(cursor, unwContext, UNW_X86_64_R14, &contextPointers->R14);
+    GetContextPointer(cursor, unwContext, UNW_X86_64_R15, &contextPointers->R15);
 #else
 #error unsupported architecture
 #endif
@@ -121,6 +131,9 @@ BOOL PAL_VirtualUnwind(CONTEXT *context, KNONVOLATILE_CONTEXT_POINTERS *contextP
     int st;
     unw_context_t unwContext;
     unw_cursor_t cursor;
+#if defined(__APPLE__) || defined(__FreeBSD__)
+    DWORD64 curPc;
+#endif
 
 #if UNWIND_CONTEXT_IS_UCONTEXT_T
     WinContextToUnwindContext(context, &unwContext);
@@ -143,6 +156,18 @@ BOOL PAL_VirtualUnwind(CONTEXT *context, KNONVOLATILE_CONTEXT_POINTERS *contextP
     WinContextToUnwindCursor(context, &cursor);
 #endif
 
+#if defined(__APPLE__) || defined(__FreeBSD__)
+    // OSX and FreeBSD appear to do two different things when unwinding
+    // 1: If it reaches where it cannot unwind anymore, say a 
+    // managed frame.  It wil return 0, but also update the $pc
+    // 2: If it unwinds all the way to _start it will return
+    // 0 from the step, but $pc will stay the same.
+    // The behaviour of libunwind from nongnu.org is to null the PC
+    // So we bank the original PC here, so we can compare it after
+    // the step
+    curPc = context->Rip;
+#endif
+
     st = unw_step(&cursor);
     if (st < 0)
     {
@@ -150,11 +175,18 @@ BOOL PAL_VirtualUnwind(CONTEXT *context, KNONVOLATILE_CONTEXT_POINTERS *contextP
     }
 
     // Update the passed in windows context to reflect the unwind
+    //
     UnwindContextToWinContext(&cursor, context);
+#if defined(__APPLE__) || defined(__FreeBSD__)
+    if (st == 0 && context->Rip == curPc)
+    {
+        context->Rip = 0;
+    }
+#endif
 
     if (contextPointers != NULL)
     {
-        GetContextPointers(&cursor, contextPointers);
+        GetContextPointers(&cursor, &unwContext, contextPointers);
     }
 
     return TRUE;

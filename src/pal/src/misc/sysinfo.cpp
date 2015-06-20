@@ -76,6 +76,16 @@ SET_DEFAULT_DEBUG_CHANNEL(MISC);
 #include <sys/vmparam.h>
 #endif
 
+#ifndef __APPLE__
+#if HAVE_SYSCONF && HAVE__SC_AVPHYS_PAGES
+#define SYSCONF_PAGES _SC_AVPHYS_PAGES
+#elif HAVE_SYSCONF && HAVE__SC_PHYS_PAGES
+#define SYSCONF_PAGES _SC_PHYS_PAGES
+#else
+#error Dont know how to get page-size on this architecture!
+#endif
+#endif // __APPLE__
+
 
 /*++
 Function:
@@ -256,8 +266,8 @@ GlobalMemoryStatusEx(
     // We do this only when we have the total physical memory available.
     if (lpBuffer->ullTotalPhys > 0)
     {
-#if HAVE_SYSCONF && HAVE__SC_AVPHYS_PAGES
-        lpBuffer->ullAvailPhys = sysconf(_SC_AVPHYS_PAGES) * sysconf(_SC_PAGE_SIZE);
+#ifndef __APPLE__
+        lpBuffer->ullAvailPhys = sysconf(SYSCONF_PAGES) * sysconf(_SC_PAGE_SIZE);
         INT64 used_memory = lpBuffer->ullTotalPhys - lpBuffer->ullAvailPhys;
         lpBuffer->dwMemoryLoad = (DWORD)((used_memory * 100) / lpBuffer->ullTotalPhys);
 #else
@@ -276,11 +286,15 @@ GlobalMemoryStatusEx(
                 lpBuffer->dwMemoryLoad = (DWORD)((used_memory * 100) / lpBuffer->ullTotalPhys);
             }
         }
-#endif // HAVE_SYSCONF
+#endif // __APPLE__
     }
 
-    // TODO: figure out a way to get the real values for the total / available virtual
-    lpBuffer->ullTotalVirtual = lpBuffer->ullTotalPhys;
+    // There is no API to get the total virtual address space size on 
+    // Unix, so we use a constant value representing 128TB, which is 
+    // the approximate size of total user virtual address space on
+    // the currently supported Unix systems.
+    static const UINT64 _128TB = (1ull << 47); 
+    lpBuffer->ullTotalVirtual = _128TB;
     lpBuffer->ullAvailVirtual = lpBuffer->ullAvailPhys;
 
     LOGEXIT("GlobalMemoryStatusEx returns %d\n", fRetVal);
@@ -296,6 +310,19 @@ GetCurrentProcessorNumber()
 {
     // TODO: implement this
     return 0;
+}
+
+DWORD
+PALAPI
+PAL_GetLogicalCpuCountFromOS()
+{
+    DWORD numLogicalCores = 0;
+
+#if HAVE_SYSCONF
+    numLogicalCores = sysconf(_SC_NPROCESSORS_ONLN);
+#endif
+
+    return numLogicalCores;
 }
 
 #endif // defined(_AMD64_)

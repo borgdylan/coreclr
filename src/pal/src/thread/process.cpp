@@ -23,6 +23,7 @@ Abstract:
 #include "pal/thread.hpp"
 #include "pal/file.hpp"
 #include "pal/handlemgr.hpp"
+#include "pal/module.h"
 #include "procprivate.hpp"
 #include "pal/palinternal.h"
 #include "pal/process.h"
@@ -31,6 +32,7 @@ Abstract:
 #include "pal/dbgmsg.h"
 #include "pal/utils.h"
 #include "pal/misc.h"
+#include "pal/virtual.h"
 
 #include <errno.h>
 #if HAVE_POLL
@@ -39,6 +41,7 @@ Abstract:
 #include "pal/fakepoll.h"
 #endif  // HAVE_POLL
 
+#include <sys/mman.h>
 #include <sys/types.h>
 #include <signal.h>
 #include <sys/wait.h>
@@ -85,6 +88,16 @@ CObjectType CorUnix::otProcess(
                 CObjectType::NoOwner
                 );
 
+//
+// Helper memory page used by the FlushProcessWriteBuffers
+//
+static int s_helperPage[VIRTUAL_PAGE_SIZE / sizeof(int)] __attribute__((aligned(VIRTUAL_PAGE_SIZE)));
+
+//
+// Mutex to make the FlushProcessWriteBuffersMutex thread safe
+// 
+pthread_mutex_t flushProcessWriteBuffersMutex;
+
 CAllowedObjectTypes aotProcess(otiProcess);
 
 //
@@ -120,7 +133,7 @@ Volatile<LONG> terminator = 0;
 // Process ID of this process.
 DWORD gPID = (DWORD) -1;
 
-LPWSTR pAppDir;
+LPWSTR pAppDir = NULL;
 
 //
 // Key used for associating CPalThread's with the underlying pthread
@@ -160,7 +173,18 @@ static int checkFileType(char *lpFileName);
 static BOOL PROCEndProcess(HANDLE hProcess, UINT uExitCode,
                            BOOL bTerminateUnconditionally);
 
+//
+// Struct for temporary process module list
+//
+struct ProcessModules
+{
+    ProcessModules *Next;
+    PVOID BaseAddress;
+    CHAR Name[0];
+};
 
+ProcessModules *CreateProcessModules(IN HANDLE hProcess, OUT LPDWORD lpCount);
+void DestroyProcessModules(IN ProcessModules *listHead);
 
 /*++
 Function:
@@ -808,11 +832,11 @@ CorUnix::InternalCreateProcess(
         &hDummyThread
         );
     
-    if(dwCreationFlags & CREATE_SUSPENDED)
+    if (dwCreationFlags & CREATE_SUSPENDED)
     {
         int pipe_descs[2];
 
-        if(-1 == pipe(pipe_descs))
+        if (-1 == pipe(pipe_descs))
         {
             ERROR("pipe() failed! error is %d (%s)\n", errno, strerror(errno));
             palError = ERROR_NOT_ENOUGH_MEMORY;
@@ -861,11 +885,13 @@ CorUnix::InternalCreateProcess(
 
     if (processId == -1)
     {
-        ASSERT("unable to create a new process with fork()\n");
-        if(-1 != child_blocking_pipe)
+        ASSERT("Unable to create a new process with fork()\n");
+        if (-1 != child_blocking_pipe)
         {
             close(child_blocking_pipe);
+            close(parent_blocking_pipe);
         }
+
         palError = ERROR_INTERNAL_ERROR;
         goto InternalCreateProcessExit;
     }
@@ -902,7 +928,7 @@ CorUnix::InternalCreateProcess(
             _exit(EXIT_FAILURE);
         }
         
-        if(dwCreationFlags & CREATE_SUSPENDED)
+        if (dwCreationFlags & CREATE_SUSPENDED)
         {
             BYTE resume_code = 0;
             ssize_t read_ret;
@@ -913,7 +939,7 @@ CorUnix::InternalCreateProcess(
             read_again:
             /* block until ResumeThread writes something to the pipe */
             read_ret = read(child_blocking_pipe, &resume_code, sizeof(resume_code));
-            if(sizeof(resume_code) != read_ret)
+            if (sizeof(resume_code) != read_ret)
             {
                 if (read_ret == -1 && EINTR == errno)
                 {
@@ -932,6 +958,7 @@ CorUnix::InternalCreateProcess(
                 // resume_code should always equal WAKEUPCODE.
                 _exit(EXIT_FAILURE);
             }
+
             close(child_blocking_pipe);
         }
 
@@ -1743,6 +1770,277 @@ OpenProcessExit:
 
 /*++
 Function:
+  EnumProcessModules
+
+Abstract
+  Returns a process's module list
+
+Return
+  TRUE if it succeeded, FALSE otherwise
+
+Notes
+  This API is tricky because the module handles are never closed/freed so there can't be any 
+  allocations for the module handle or name strings, etc. The "handles" are actually the base 
+  addresses of the modules. The module handles should only be used by GetModuleFileNameExW 
+  below. 
+--*/
+BOOL
+PALAPI
+EnumProcessModules(
+    IN HANDLE hProcess,
+    OUT HMODULE *lphModule,
+    IN DWORD cb,
+    OUT LPDWORD lpcbNeeded)
+{
+    PERF_ENTRY(EnumProcessModules);
+    ENTRY("EnumProcessModules(hProcess=0x%08x, cb=%d)\n", hProcess, cb);
+
+    BOOL result = TRUE;
+    DWORD count = 0;
+
+    ProcessModules *listHead = CreateProcessModules(hProcess, &count);
+    if (listHead != NULL)
+    {
+        for (ProcessModules *entry = listHead; entry != NULL; entry = entry->Next)
+        {
+            if (cb <= 0)
+            {
+                break;
+            }
+            cb -= sizeof(HMODULE);
+            *lphModule = (HMODULE)entry->BaseAddress;
+            lphModule++;
+        }
+    }
+    else
+    {
+        result = FALSE;
+    }
+
+    DestroyProcessModules(listHead);
+
+    if (lpcbNeeded)
+    {
+        // This return value isn't exactly up to spec because it should return the actual
+        // number of modules in the process even if "cb" isn't big enough but for our use
+        // it works just fine.
+        (*lpcbNeeded) = count * sizeof(HMODULE);
+    }
+
+    LOGEXIT("EnumProcessModules returns %d\n", result);
+    PERF_EXIT(EnumProcessModules);
+    return result;
+}
+
+/*++
+Function:
+  GetModuleFileNameExW
+
+  Used only with module handles returned from EnumProcessModule (for dbgshim). 
+
+--*/
+DWORD
+PALAPI
+GetModuleFileNameExW(
+    IN HANDLE hProcess,
+    IN HMODULE hModule,
+    OUT LPWSTR lpFilename,
+    IN DWORD nSize
+)
+{
+    DWORD result = 0;
+    DWORD count = 0;
+
+    ProcessModules *listHead = CreateProcessModules(hProcess, &count);
+    if (listHead != NULL)
+    {
+        for (ProcessModules *entry = listHead; entry != NULL; entry = entry->Next)
+        {
+            if ((HMODULE)entry->BaseAddress == hModule)
+            {
+                // Convert CHAR string into WCHAR string
+                result = MultiByteToWideChar(CP_ACP, 0, entry->Name, -1, lpFilename, nSize);
+                break;
+            }
+        }
+    }
+
+    DestroyProcessModules(listHead);
+
+    return result;
+}
+
+/*++
+Function:
+  CreateProcessModules
+
+Abstract
+  Returns a process's module list
+
+Return
+  ProcessModules * list
+
+--*/
+ProcessModules *
+CreateProcessModules(
+    IN HANDLE hProcess,
+    OUT LPDWORD lpCount)
+{
+    DWORD dwProcessId = PROCGetProcessIDFromHandle(hProcess);
+    if (dwProcessId == 0)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return NULL;
+    }
+
+#ifdef HAVE_PROCFS_CTL 
+    // Here we read /proc/<pid>/maps file in order to parse it and figure out what it says 
+    // about a library we are looking for. This file looks something like this:
+    //
+    // [address]      [perms] [offset] [dev] [inode]     [pathname] - HEADER is not preset in an actual file
+    //
+    // 35b1800000-35b1820000 r-xp 00000000 08:02 135522  /usr/lib64/ld-2.15.so
+    // 35b1a1f000-35b1a20000 r--p 0001f000 08:02 135522  /usr/lib64/ld-2.15.so
+    // 35b1a20000-35b1a21000 rw-p 00020000 08:02 135522  /usr/lib64/ld-2.15.so
+    // 35b1a21000-35b1a22000 rw-p 00000000 00:00 0       [heap]
+    // 35b1c00000-35b1dac000 r-xp 00000000 08:02 135870  /usr/lib64/libc-2.15.so
+    // 35b1dac000-35b1fac000 ---p 001ac000 08:02 135870  /usr/lib64/libc-2.15.so
+    // 35b1fac000-35b1fb0000 r--p 001ac000 08:02 135870  /usr/lib64/libc-2.15.so
+    // 35b1fb0000-35b1fb2000 rw-p 001b0000 08:02 135870  /usr/lib64/libc-2.15.so
+
+    // Making something like: /proc/123/maps
+    char mapFileName[100]; 
+    int chars = snprintf(mapFileName, sizeof(mapFileName), "/proc/%d/maps", dwProcessId);
+    _ASSERTE(chars > 0 && chars <= sizeof(mapFileName));
+
+    FILE *mapsFile = fopen(mapFileName, "r");
+    if (mapsFile == NULL) 
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return NULL;
+    }
+
+    CPalThread* pThread = InternalGetCurrentThread();	
+    ProcessModules *listHead = NULL;
+    char *line = NULL;
+    size_t lineLen = 0;
+    int count = 0;
+    ssize_t read;
+
+    // Reading maps file line by line 
+    while ((read = getline(&line, &lineLen, mapsFile)) != -1) 
+    {
+        void *startAddress, *endAddress, *offset;
+        int devHi, devLo, inode;
+        char moduleName[PATH_MAX];
+
+        if (sscanf(line, "%p-%p %*[-rwxsp] %p %x:%x %d %s\n", &startAddress, &endAddress, &offset, &devHi, &devLo, &inode, moduleName) == 7)
+        {
+            if (inode != 0)
+            {
+                bool dup = false;
+                for (ProcessModules *entry = listHead; entry != NULL; entry = entry->Next)
+                {
+                    if (strcmp(moduleName, entry->Name) == 0)
+                    {
+                        dup = true;
+                        break;
+                    }
+                }
+
+                if (!dup)
+                {
+                    int cbModuleName = strlen(moduleName) + 1;
+                    ProcessModules *entry = (ProcessModules *)InternalMalloc(pThread, sizeof(ProcessModules) + cbModuleName);
+                    if (entry == NULL)
+                    {
+                        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+                        DestroyProcessModules(listHead);
+                        listHead = NULL;
+                        count = 0;
+                        break;
+                    }
+                    strcpy_s(entry->Name, cbModuleName, moduleName);
+                    entry->BaseAddress = startAddress;
+                    entry->Next = listHead;
+                    listHead = entry;
+                    count++;
+                }
+            }
+        }
+    }
+
+    *lpCount = count;
+
+    free(line); // We didn't allocate line, but as per contract of getline we should free it
+    fclose(mapsFile);
+
+    return listHead;
+#else
+    _ASSERTE(!"Not implemented on this platform");
+    return NULL;
+#endif
+}
+
+void
+DestroyProcessModules(IN ProcessModules *listHead)
+{
+    CPalThread* pThread = InternalGetCurrentThread();	
+
+    for (ProcessModules *entry = listHead; entry != NULL; )
+    {
+        ProcessModules *next = entry->Next;
+        InternalFree(pThread, entry);
+        entry = next;
+    }
+}
+
+/*++
+Function:
+  InitializeFlushProcessWriteBuffers
+
+Abstract
+  This function initializes data structures needed for the FlushProcessWriteBuffers
+Return
+  TRUE if it succeeded, FALSE otherwise
+--*/
+BOOL InitializeFlushProcessWriteBuffers()
+{
+    // Verify that the s_helperPage is really aligned to the VIRTUAL_PAGE_SIZE
+    _ASSERTE((((SIZE_T)s_helperPage) & (VIRTUAL_PAGE_SIZE - 1)) == 0);
+
+    // Locking the page ensures that it stays in memory during the two mprotect
+    // calls in the FlushProcessWriteBuffers below. If the page was unmapped between
+    // those calls, they would not have the expected effect of generating IPI.
+    int status = mlock(s_helperPage, VIRTUAL_PAGE_SIZE);
+
+    if (status != 0)
+    {
+        return FALSE;
+    }
+
+    status = pthread_mutex_init(&flushProcessWriteBuffersMutex, NULL);
+    if (status != 0)
+    {
+        munlock(s_helperPage, VIRTUAL_PAGE_SIZE);
+    }
+
+    return status == 0;
+}
+
+#define FATAL_ASSERT(e, msg) \
+    do \
+    { \
+        if (!(e)) \
+        { \
+            fprintf(stderr, "FATAL ERROR: " msg); \
+            abort(); \
+        } \
+    } \
+    while(0)
+
+/*++
+Function:
   FlushProcessWriteBuffers
 
 See MSDN doc.
@@ -1750,9 +2048,25 @@ See MSDN doc.
 VOID 
 PALAPI 
 FlushProcessWriteBuffers()
-{
-    // UNIXTODO: Implement this. There seems to be no equivalent on Linux
-    // that could be used in user mode code.   
+{   
+    int status = pthread_mutex_lock(&flushProcessWriteBuffersMutex);
+    FATAL_ASSERT(status == 0, "Failed to lock the flushProcessWriteBuffersMutex lock");
+
+    // Changing a helper memory page protection from read / write to no access 
+    // causes the OS to issue IPI to flush TLBs on all processors. This also
+    // results in flushing the processor buffers.
+    status = mprotect(s_helperPage, VIRTUAL_PAGE_SIZE, PROT_READ | PROT_WRITE);
+    FATAL_ASSERT(status == 0, "Failed to change helper page protection to read / write");
+
+    // Ensure that the page is dirty before we change the protection so that
+    // we prevent the OS from skipping the global TLB flush.
+    InterlockedIncrement(s_helperPage);
+
+    status = mprotect(s_helperPage, VIRTUAL_PAGE_SIZE, PROT_NONE);
+    FATAL_ASSERT(status == 0, "Failed to change helper page protection to no access");
+
+    status = pthread_mutex_unlock(&flushProcessWriteBuffersMutex);
+    FATAL_ASSERT(status == 0, "Failed to unlock the flushProcessWriteBuffersMutex lock");
 }
 
 /*++
@@ -1879,40 +2193,40 @@ CorUnix::CreateInitialProcessAndThreadObjects(
     CProcSharedData *pSharedData;
     CObjectAttributes oa;
     HANDLE hProcess;
-    
-    INT n;
-    LPWSTR lpwstr = NULL;
     LPWSTR initial_dir = NULL;
 
     //
     // Save the command line and initial directory
     //
 
-    g_lpwstrCmdLine = lpwstrCmdLine;
+    g_lpwstrCmdLine = lpwstrCmdLine ? lpwstrCmdLine : (LPWSTR)W("");
     
-    lpwstr=PAL_wcsrchr(lpwstrFullPath,'/');
-    lpwstr[0]='\0';
-    n=lstrlenW(lpwstrFullPath)+1;
-
-    int iLen = n;
-    initial_dir = reinterpret_cast<LPWSTR>(InternalMalloc(pThread, iLen*sizeof(WCHAR)));
-    if (NULL == initial_dir)
+    if (lpwstrCmdLine)
     {
-        ERROR("malloc() failed! (initial_dir) \n");
-        goto CreateInitialProcessAndThreadObjectsExit;
+        LPWSTR lpwstr = PAL_wcsrchr(lpwstrFullPath, '/');
+        lpwstr[0] = '\0';
+        INT n = lstrlenW(lpwstrFullPath) + 1;
+
+        int iLen = n;
+        initial_dir = reinterpret_cast<LPWSTR>(InternalMalloc(pThread, iLen*sizeof(WCHAR)));
+        if (NULL == initial_dir)
+        {
+            ERROR("malloc() failed! (initial_dir) \n");
+            goto CreateInitialProcessAndThreadObjectsExit;
+        }
+
+        if (wcscpy_s(initial_dir, iLen, lpwstrFullPath) != SAFECRT_SUCCESS)
+        {
+            ERROR("wcscpy_s failed!\n");
+            palError = ERROR_INTERNAL_ERROR;
+            goto CreateInitialProcessAndThreadObjectsExit;
+        }
+
+        lpwstr[0] = '/';
     }
-
-    if (wcscpy_s(initial_dir, iLen, lpwstrFullPath) != SAFECRT_SUCCESS)
-    {
-        ERROR("wcscpy_s failed!\n");
-        palError = ERROR_INTERNAL_ERROR;
-        goto CreateInitialProcessAndThreadObjectsExit;
-    }
-
-    lpwstr[0]='/';
-
+    
     pAppDir = initial_dir;
-    
+
     //
     // Create initial thread object
     //
@@ -3434,33 +3748,36 @@ getPath(
     /* first look in directory from which the application loaded */
     lpwstr=pAppDir;
 
-    /* convert path to multibyte, check buffer size */
-    n = WideCharToMultiByte(CP_ACP, 0, lpwstr, -1, lpPathFileName, iLen,
-                            NULL, NULL);
-    if(n == 0)
+    if (lpwstr)
     {
-        ASSERT("WideCharToMultiByte failure!\n");
-        return FALSE;
-    }
+        /* convert path to multibyte, check buffer size */
+        n = WideCharToMultiByte(CP_ACP, 0, lpwstr, -1, lpPathFileName, iLen,
+            NULL, NULL);
+        if (n == 0)
+        {
+            ASSERT("WideCharToMultiByte failure!\n");
+            return FALSE;
+        }
 
-    n += strlen(lpFileName) + 2;
-    if( n > (INT) iLen )
-    {
-        ERROR("Buffer too small for full path!\n");
-        return FALSE;
-    }
-    
-    if ((strcat_s(lpPathFileName, iLen, "/") != SAFECRT_SUCCESS) ||
-        (strcat_s(lpPathFileName, iLen, lpFileName) != SAFECRT_SUCCESS))
-    {
-        ERROR("strcat_s failed!\n");
-        return FALSE;
-    }
+        n += strlen(lpFileName) + 2;
+        if (n > (INT)iLen)
+        {
+            ERROR("Buffer too small for full path!\n");
+            return FALSE;
+        }
 
-    if(access(lpPathFileName, F_OK) == 0)
-    {
-        TRACE("found %s in application directory (%s)\n", lpFileName, lpPathFileName);
-        return TRUE;
+        if ((strcat_s(lpPathFileName, iLen, "/") != SAFECRT_SUCCESS) ||
+            (strcat_s(lpPathFileName, iLen, lpFileName) != SAFECRT_SUCCESS))
+        {
+            ERROR("strcat_s failed!\n");
+            return FALSE;
+        }
+
+        if (access(lpPathFileName, F_OK) == 0)
+        {
+            TRACE("found %s in application directory (%s)\n", lpFileName, lpPathFileName);
+            return TRUE;
+        }
     }
 
     /* then try the current directory */
@@ -3568,7 +3885,7 @@ CorUnix::CPalThread *PROCThreadFromMachPort(mach_port_t hTargetThread)
     pThread = pGThreadList;
     while (pThread)
     {
-        pthread_t pPThread = (pthread_t)pThread->GetThreadId();
+        pthread_t pPThread = pThread->GetPThreadSelf();
         mach_port_t hThread = pthread_mach_thread_np(pPThread);
         if (hThread == hTargetThread)
             break;

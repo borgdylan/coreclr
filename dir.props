@@ -20,11 +20,12 @@
     <SourceDir>$(__SourceDir)\</SourceDir>
     <SourceDir Condition="'$(__SourceDir)'==''">$(ProjectDir)\src\</SourceDir>
 
+    <PackagesGlobalConfig>$(SourceDir).nuget\packages.config</PackagesGlobalConfig>
     <PackagesDir>$(__PackagesDir)\</PackagesDir>
     <PackagesDir Condition="'$(__PackagesDir)'==''">$(ProjectDir)\packages\</PackagesDir>
 
     <RootBinDir>$(__RootBinDir)\</RootBinDir>
-    <RootBinDir Condition="'$(__RootBinDir)'==''">$(ProjectDir)\binaries\</RootBinDir>
+    <RootBinDir Condition="'$(__RootBinDir)'==''">$(ProjectDir)\bin\</RootBinDir>
 
     <BinDir>$(__BinDir)\</BinDir>
     <BinDir Condition="'$(__BinDir)'==''">$(RootBinDir)\Product\$(BuildOS).$(BuildArch).$(BuildType)\</BinDir>
@@ -55,7 +56,16 @@
     <NuSpecs Condition="'$(Configuration)'=='Debug'" Include="$(PackagesBinDir)\Microsoft.DotNet.CoreCLR.Debug.Development.nuspec" />
   </ItemGroup>
 
-
+  <!-- Setup common target properties that we use to conditionally include sources -->
+  <PropertyGroup>
+    <TargetsFreeBSD Condition="'$(BuildOS)' == 'FreeBSD'">true</TargetsFreeBSD>
+    <TargetsLinux Condition="'$(BuildOS)' == 'Linux'">true</TargetsLinux>
+    <TargetsOSX Condition="'$(BuildOS)' == 'OSX'">true</TargetsOSX>
+    <TargetsWindows Condition="'$(BuildOS)' == 'Windows_NT'">true</TargetsWindows>
+    
+    <TargetsUnix Condition="'$(TargetsFreeBSD)' == 'true' or '$(TargetsLinux)' == 'true' or '$(TargetsOSX)' == 'true'">true</TargetsUnix>
+  </PropertyGroup>
+  
   <!-- Common NuGet properties -->
   <PropertyGroup>
     <NuGetToolPath>$(ToolsDir)NuGet.exe</NuGetToolPath>
@@ -68,7 +78,7 @@
   <PropertyGroup>
 
     <BuildToolsCoreCLRPackageName>Microsoft.DotNet.BuildTools.CoreCLR</BuildToolsCoreCLRPackageName>
-    <BuildToolsCoreCLRVersion>1.0.1-prerelease</BuildToolsCoreCLRVersion>
+    <BuildToolsCoreCLRVersion>1.0.2-prerelease</BuildToolsCoreCLRVersion>
     <BuildToolsCoreCLRInstallSempahore>$(ToolsDir)BuildTools.$(BuildToolsCoreCLRVersion).installed.semaphore</BuildToolsCoreCLRInstallSempahore>
 
     <BuildToolsPackageName>Microsoft.DotNet.BuildTools</BuildToolsPackageName>

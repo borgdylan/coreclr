@@ -14,6 +14,7 @@
 #cmakedefine01 HAVE_PTHREAD_NP_H
 #cmakedefine01 HAVE_SYS_LWP_H
 #cmakedefine01 HAVE_LIBUNWIND_H
+#cmakedefine01 HAVE_RUNETYPE_H
 
 #cmakedefine01 HAVE_KQUEUE
 #cmakedefine01 HAVE_GETPWUID_R
@@ -22,6 +23,8 @@
 #cmakedefine01 HAVE_PTHREAD_CONTINUE
 #cmakedefine01 HAVE_PTHREAD_RESUME_NP
 #cmakedefine01 HAVE_PTHREAD_CONTINUE_NP
+#cmakedefine01 HAVE_PTHREAD_ATTR_GET_NP
+#cmakedefine01 HAVE_PTHREAD_GETATTR_NP
 #cmakedefine01 HAVE_SIGRETURN
 #cmakedefine01 HAVE__THREAD_SYS_SIGRETURN
 #cmakedefine01 HAVE_SETCONTEXT
@@ -47,9 +50,12 @@
 #cmakedefine01 HAS_SYSV_SEMAPHORES
 #cmakedefine01 HAS_PTHREAD_MUTEXES
 #cmakedefine01 HAVE_TTRACE
+#cmakedefine01 HAVE_STAT64
+#cmakedefine01 HAVE_STAT
 
 #cmakedefine01 HAVE_STAT_TIMESPEC
 #cmakedefine01 HAVE_STAT_NSEC
+#cmakedefine01 HAVE_STAT_BIRTHTIME
 #cmakedefine01 HAVE_TM_GMTOFF
 
 #cmakedefine01 HAVE_BSD_REGS_T
@@ -61,8 +67,6 @@
 #cmakedefine01 HAVE_PRWATCH_T
 #cmakedefine SIZEOF_OFF_T @SIZEOF_OFF_T@
 
-#cmakedefine01 HAVE_TZNAME
-#cmakedefine01 HAVE_TIMEZONE_VAR
 #cmakedefine01 HAVE_YIELD_SYSCALL
 #cmakedefine01 HAVE_INFTIM
 #cmakedefine01 HAVE_CHAR_BIT
@@ -120,6 +124,7 @@
 #cmakedefine01 ERROR_FUNC_FOR_GLOB_HAS_FIXED_PARAMS
 #cmakedefine01 HAS_FTRUNCATE_LENGTH_ISSUE
 #cmakedefine01 UNWIND_CONTEXT_IS_UCONTEXT_T
+#cmakedefine FREEBSD_LIBC "@FREEBSD_LIBC@"
 
 #cmakedefine JA_JP_LOCALE_NAME "@JA_JP_LOCALE_NAME@"
 #cmakedefine KO_KR_LOCALE_NAME "@KO_KR_LOCALE_NAME@"

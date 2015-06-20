@@ -63,21 +63,19 @@ DoRestore:
         // So, if m_pReg points into the MachState, we need to update
         // the register here.  That's what this macro does.
         //
-#define RestoreReg(reg) \
-        lea     rax, [rdi + OFFSETOF__MachState__m_Capture##reg]; \
-        mov     rdx, [rdi + OFFSETOF__MachState__m_p##reg]; \
+#define RestoreReg(reg, regnum) \
+        lea     rax, [rdi + OFFSETOF__MachState__m_Capture + 8 * regnum]; \
+        mov     rdx, [rdi + OFFSETOF__MachState__m_Ptrs + 8 * regnum]; \
         cmp     rax, rdx; \
         cmove   reg, [rax];
-// .endm
 
-        //RestoreReg(Rdi)
-        //RestoreReg(Rsi)
-        RestoreReg(Rbx)
-        RestoreReg(Rbp)
-        RestoreReg(R12)
-        RestoreReg(R13)
-        RestoreReg(R14)
-        RestoreReg(R15)
+        // regnum has to match ENUM_CALLEE_SAVED_REGISTERS macro
+        RestoreReg(R12, 0)
+        RestoreReg(R13, 1)
+        RestoreReg(R14, 2)
+        RestoreReg(R15, 3)
+        RestoreReg(Rbx, 4)
+        RestoreReg(Rbp, 5)
 
         xor     eax, eax
         ret
@@ -190,3 +188,42 @@ NullObject:
         jmp     C_FUNC(JIT_InternalThrow)
                                                                                       
 LEAF_END SinglecastDelegateInvokeStub, _TEXT
+
+//////////////////////////////////////////////////////////////////////////
+//
+// This function initiates unwinding of native frames during the unwinding of a managed 
+// exception. The managed exception can be propagated over several managed / native ranges 
+// until it is finally handled by a managed handler or leaves the stack unhandled and
+// aborts the current process.
+// It creates a stack frame right below the target frame, restores all callee saved registers
+// from the passed in context and finally sets the RSP to that frame and sets the return
+// address to the target frame's RIP.
+//
+// EXTERN_C void StartUnwindingNativeFrames(CONTEXT* context);
+LEAF_ENTRY StartUnwindingNativeFrames, _TEXT
+        // Save the RBP to the stack so that the unwind can work at the instruction after
+        // loading the RBP from the context, but before loading the RSP from the context.
+        push_nonvol_reg rbp
+        mov     r12, [rdi + OFFSETOF__CONTEXT__R12]
+        mov     r13, [rdi + OFFSETOF__CONTEXT__R13]
+        mov     r14, [rdi + OFFSETOF__CONTEXT__R14]
+        mov     r15, [rdi + OFFSETOF__CONTEXT__R15]
+        mov     rbx, [rdi + OFFSETOF__CONTEXT__Rbx]
+        mov     rbp, [rdi + OFFSETOF__CONTEXT__Rbp]
+        mov     rsp, [rdi + OFFSETOF__CONTEXT__Rsp]
+        // The RSP was set to the target frame's value, so the current function's
+        // CFA is now right at the RSP.
+        .cfi_def_cfa_offset 0
+
+        // Indicate that now that we have moved the RSP to the target address, 
+        // the RBP is no longer saved in the current stack frame. 
+        .cfi_restore rbp
+
+        mov     rax, [rdi + OFFSETOF__CONTEXT__Rip]
+
+        // Store return address to the stack
+        push_register rax
+        push_nonvol_reg rbp
+        call    EXTERNAL_C_FUNC(__cxa_rethrow)
+LEAF_END StartUnwindingNativeFrames, _TEXT
+

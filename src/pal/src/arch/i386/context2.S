@@ -8,15 +8,20 @@
 // and is always apply to the current thread.
 //
 
-#include "macros.inc"
+.intel_syntax noprefix
+#include "unixasmmacros.inc"
 
 #ifdef BIT64
+
+#define CONTEXT_AMD64   0x100000
 
 #define CONTEXT_CONTROL 1 // SegSs, Rsp, SegCs, Rip, and EFlags
 #define CONTEXT_INTEGER 2 // Rax, Rcx, Rdx, Rbx, Rbp, Rsi, Rdi, R8-R15
 #define CONTEXT_SEGMENTS 4 // SegDs, SegEs, SegFs, SegGs
 #define CONTEXT_FLOATING_POINT 8
 #define CONTEXT_DEBUG_REGISTERS 16 // Dr0-Dr3 and Dr6-Dr7
+
+#define CONTEXT_FULL (CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_FLOATING_POINT)
 
 #define CONTEXT_ContextFlags 6*8
 #define CONTEXT_SegCs CONTEXT_ContextFlags+8
@@ -75,69 +80,172 @@
 #define CONTEXT_LastExceptionToRip CONTEXT_LastBranchFromRip+8
 #define CONTEXT_LastExceptionFromRip CONTEXT_LastExceptionToRip+8
 
+#define IRETFRAME_Rip 0
+#define IRETFRAME_SegCs IRETFRAME_Rip+8
+#define IRETFRAME_EFlags IRETFRAME_SegCs+8
+#define IRETFRAME_Rsp IRETFRAME_EFlags+8
+#define IRETFRAME_SegSs IRETFRAME_Rsp+8
+#define IRetFrameLength IRETFRAME_SegSs+8
+#define IRetFrameLengthAligned 16*((IRetFrameLength+8)/16)
+
 // Incoming:
 //  RDI: Context*
 //
-    .globl C_FUNC(CONTEXT_CaptureContext)
-C_FUNC(CONTEXT_CaptureContext):
-    testb $CONTEXT_INTEGER, CONTEXT_ContextFlags(%rdi)
-    je 0f
-    mov %rdi, CONTEXT_Rdi(%rdi)
-    mov %rsi, CONTEXT_Rsi(%rdi)
-    mov %rbx, CONTEXT_Rbx(%rdi)
-    mov %rdx, CONTEXT_Rdx(%rdi)
-    mov %rcx, CONTEXT_Rcx(%rdi)
-    mov %rax, CONTEXT_Rax(%rdi)
-    mov %rbp, CONTEXT_Rbp(%rdi)
-    mov %r8, CONTEXT_R8(%rdi)
-    mov %r9, CONTEXT_R9(%rdi)
-    mov %r10, CONTEXT_R10(%rdi)
-    mov %r11, CONTEXT_R11(%rdi)
-    mov %r12, CONTEXT_R12(%rdi)
-    mov %r13, CONTEXT_R13(%rdi)
-    mov %r14, CONTEXT_R14(%rdi)
-    mov %r15, CONTEXT_R15(%rdi)
-    jmp 1f
-0:
-    nop
-1:
-    testb $CONTEXT_CONTROL, CONTEXT_ContextFlags(%rdi)
-    je 2f
+LEAF_ENTRY CONTEXT_CaptureContext, _TEXT
+    // Save processor flags before calling any of the following 'test' instructions
+    // because they will modify state of some flags
+    push_eflags
+    END_PROLOGUE
+
+    test    BYTE PTR [rdi + CONTEXT_ContextFlags], CONTEXT_INTEGER
+    je      LOCAL_LABEL(Done_CONTEXT_INTEGER)
+    mov     [rdi + CONTEXT_Rdi], rdi
+    mov     [rdi + CONTEXT_Rsi], rsi
+    mov     [rdi + CONTEXT_Rbx], rbx
+    mov     [rdi + CONTEXT_Rdx], rdx
+    mov     [rdi + CONTEXT_Rcx], rcx
+    mov     [rdi + CONTEXT_Rax], rax
+    mov     [rdi + CONTEXT_Rbp], rbp
+    mov     [rdi + CONTEXT_R8], r8
+    mov     [rdi + CONTEXT_R9], r9
+    mov     [rdi + CONTEXT_R10], r10
+    mov     [rdi + CONTEXT_R11], r11
+    mov     [rdi + CONTEXT_R12], r12
+    mov     [rdi + CONTEXT_R13], r13
+    mov     [rdi + CONTEXT_R14], r14
+    mov     [rdi + CONTEXT_R15], r15   
+LOCAL_LABEL(Done_CONTEXT_INTEGER):
+
+    test    BYTE PTR [rdi + CONTEXT_ContextFlags], CONTEXT_CONTROL
+    je      LOCAL_LABEL(Done_CONTEXT_CONTROL)
     
-    // Return address is @ RSP
-    mov (%rsp), %rdx
-    mov %rdx, CONTEXT_Rip(%rdi)
-    mov %cs, CONTEXT_SegCs(%rdi)
-    pushfq
-    pop %rdx
-    mov %edx, CONTEXT_EFlags(%rdi)
-    lea 8(%rsp), %rdx
-    mov %rdx, CONTEXT_Rsp(%rdi)
-    mov %ss, CONTEXT_SegSs(%rdi)
-2:
+    // Return address is @ (RSP + 8)
+    mov     rdx, [rsp + 8]
+    mov     [rdi + CONTEXT_Rip], rdx
+.att_syntax 
+    mov     %cs, CONTEXT_SegCs(%rdi)
+.intel_syntax noprefix
+    // Get the value of EFlags that was pushed on stack at the beginning of the function
+    mov     rdx, [rsp]
+    mov     [rdi + CONTEXT_EFlags], edx
+    lea     rdx, [rsp + 16]
+    mov     [rdi + CONTEXT_Rsp], rdx
+.att_syntax 
+    mov     %ss, CONTEXT_SegSs(%rdi)
+.intel_syntax noprefix
+LOCAL_LABEL(Done_CONTEXT_CONTROL):
+
     // Need to double check this is producing the right result
     // also that FFSXR (fast save/restore) is not turned on
     // otherwise it omits the xmm registers.
-    testb $CONTEXT_FLOATING_POINT, CONTEXT_ContextFlags(%rdi)
-    je 3f
-    fxsave CONTEXT_FltSave(%rdi)
-3:
-    testb $CONTEXT_DEBUG_REGISTERS, CONTEXT_ContextFlags(%rdi)
-    je 4f
-    mov %dr0, %rdx
-    mov %rdx, CONTEXT_Dr0(%rdi)
-    mov %dr1, %rdx
-    mov %rdx, CONTEXT_Dr1(%rdi)
-    mov %dr2, %rdx
-    mov %rdx, CONTEXT_Dr2(%rdi)
-    mov %dr3, %rdx
-    mov %rdx, CONTEXT_Dr3(%rdi)
-    mov %dr6, %rdx
-    mov %rdx, CONTEXT_Dr6(%rdi)
-    mov %dr7, %rdx
-    mov %rdx, CONTEXT_Dr7(%rdi)
-4:
+    test    BYTE PTR [rdi + CONTEXT_ContextFlags], CONTEXT_FLOATING_POINT
+    je      LOCAL_LABEL(Done_CONTEXT_FLOATING_POINT)
+    fxsave  [rdi + CONTEXT_FltSave]
+LOCAL_LABEL(Done_CONTEXT_FLOATING_POINT):
+
+    test    BYTE PTR [rdi + CONTEXT_ContextFlags], CONTEXT_DEBUG_REGISTERS
+    je      LOCAL_LABEL(Done_CONTEXT_DEBUG_REGISTERS)
+    mov     rdx, dr0
+    mov     [rdi + CONTEXT_Dr0], rdx
+    mov     rdx, dr1
+    mov     [rdi + CONTEXT_Dr1], rdx
+    mov     rdx, dr2
+    mov     [rdi + CONTEXT_Dr2], rdx
+    mov     rdx, dr3
+    mov     [rdi + CONTEXT_Dr3], rdx
+    mov     rdx, dr6
+    mov     [rdi + CONTEXT_Dr6], rdx
+    mov     rdx, dr7
+    mov     [rdi + CONTEXT_Dr7], rdx
+LOCAL_LABEL(Done_CONTEXT_DEBUG_REGISTERS):
+
+    free_stack 8
     ret
+LEAF_END CONTEXT_CaptureContext, _TEXT
+
+LEAF_ENTRY RtlCaptureContext, _TEXT
+    mov     DWORD PTR [rdi + CONTEXT_ContextFlags], (CONTEXT_AMD64 | CONTEXT_FULL | CONTEXT_SEGMENTS)
+    jmp     C_FUNC(CONTEXT_CaptureContext)
+LEAF_END RtlCaptureContext, _TEXT
+
+LEAF_ENTRY RtlRestoreContext, _TEXT
+    push_nonvol_reg rbp
+    alloc_stack (IRetFrameLengthAligned)
+    
+    test    BYTE PTR [rdi + CONTEXT_ContextFlags], CONTEXT_DEBUG_REGISTERS
+    je      LOCAL_LABEL(Done_Restore_CONTEXT_DEBUG_REGISTERS)
+    mov     rdx, [rdi + CONTEXT_Dr0]
+    mov     dr0, rdx
+    mov     rdx, [rdi + CONTEXT_Dr1]
+    mov     dr1, rdx
+    mov     rdx, [rdi + CONTEXT_Dr2]
+    mov     dr2, rdx
+    mov     rdx, [rdi + CONTEXT_Dr3]
+    mov     dr3, rdx
+    mov     rdx, [rdi + CONTEXT_Dr6]
+    mov     dr6, rdx
+    mov     rdx, [rdi + CONTEXT_Dr7]
+    mov     dr7, rdx
+LOCAL_LABEL(Done_Restore_CONTEXT_DEBUG_REGISTERS):
+
+    test    BYTE PTR [rdi + CONTEXT_ContextFlags], CONTEXT_FLOATING_POINT
+    je      LOCAL_LABEL(Done_Restore_CONTEXT_FLOATING_POINT)
+    fxrstor [rdi + CONTEXT_FltSave]
+LOCAL_LABEL(Done_Restore_CONTEXT_FLOATING_POINT):
+
+    test    BYTE PTR [rdi + CONTEXT_ContextFlags], CONTEXT_CONTROL
+    je      LOCAL_LABEL(Done_Restore_CONTEXT_CONTROL)
+
+    // The control registers are restored via the iret instruction
+    // so we build the frame for the iret on the stack.
+    mov     ax, [rdi + CONTEXT_SegSs]
+    mov     [rsp + IRETFRAME_SegSs], ax
+    mov     rax, [rdi + CONTEXT_Rsp]
+    mov     [rsp + IRETFRAME_Rsp], rax
+    mov     eax, [rdi + CONTEXT_EFlags]
+    mov     [rsp + IRETFRAME_EFlags], eax
+    mov     ax, [rdi + CONTEXT_SegCs]
+    mov     [rsp + IRETFRAME_SegCs], ax
+    mov     rax, [rdi + CONTEXT_Rip]
+    mov     [rsp + IRETFRAME_Rip], rax
+
+LOCAL_LABEL(Done_Restore_CONTEXT_CONTROL):
+    // Remember the result of the test for the CONTEXT_CONTROL
+    push_eflags
+    test    BYTE PTR [rdi + CONTEXT_ContextFlags], CONTEXT_INTEGER
+    je      LOCAL_LABEL(Done_Restore_CONTEXT_INTEGER)
+    mov     rsi, [rdi + CONTEXT_Rsi]
+    mov     rbx, [rdi + CONTEXT_Rbx]
+    mov     rdx, [rdi + CONTEXT_Rdx]
+    mov     rcx, [rdi + CONTEXT_Rcx]
+    mov     rax, [rdi + CONTEXT_Rax]
+    mov     rbp, [rdi + CONTEXT_Rbp]
+    mov     r8, [rdi + CONTEXT_R8]
+    mov     r9, [rdi + CONTEXT_R9]
+    mov     r10, [rdi + CONTEXT_R10]
+    mov     r11, [rdi + CONTEXT_R11]
+    mov     r12, [rdi + CONTEXT_R12]
+    mov     r13, [rdi + CONTEXT_R13]
+    mov     r14, [rdi + CONTEXT_R14]
+    mov     r15, [rdi + CONTEXT_R15]   
+    mov     rdi, [rdi + CONTEXT_Rdi]
+LOCAL_LABEL(Done_Restore_CONTEXT_INTEGER):
+
+    // Restore the result of the test for the CONTEXT_CONTROL
+    pop_eflags
+    je      LOCAL_LABEL(No_Restore_CONTEXT_CONTROL)
+    // The function was asked to restore the control registers, so
+    // we perform iretq that restores them all. 
+    // We don't return to the caller in this case.
+    iretq 
+LOCAL_LABEL(No_Restore_CONTEXT_CONTROL):
+
+    // The function was not asked to restore the control registers
+    // so we return back to the caller.
+    free_stack (IRetFrameLengthAligned)
+    pop_nonvol_reg rbp
+    ret
+LEAF_END RtlRestoreContext, _TEXT
 
 #else
 

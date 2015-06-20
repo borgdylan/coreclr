@@ -2,13 +2,25 @@ cmake_minimum_required(VERSION 2.8.12.2)
 
 include(configure.cmake)
 
-project(CoreClrPal)
+project(coreclrpal)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
+
+# Enable @rpath support for shared libraries.
+set(MACOSX_RPATH ON)
+
+if(CMAKE_VERSION VERSION_EQUAL 3.0 OR CMAKE_VERSION VERSION_GREATER 3.0)
+    cmake_policy(SET CMP0042 NEW)
+endif()
 
 # Include directories
 
 include_directories(include)
+
+if(CMAKE_SYSTEM_NAME STREQUAL FreeBSD)
+  # required for libunwind
+  include_directories("/usr/local/include/")
+endif()
 
 # Compile options
 
@@ -88,12 +100,16 @@ set(SOURCES
   map/virtual.cpp
   memory/heap.cpp
   memory/local.cpp
+  misc/corefx.cpp
   misc/dbgmsg.cpp
   misc/environ.cpp
   misc/error.cpp
+  misc/errorstrings.cpp
   misc/fmtmessage.cpp
   misc/interlock.cpp
   misc/miscpalapi.cpp
+  misc/msgbox.cpp
+  misc/dactableaddress.cpp
   misc/strutil.cpp
   misc/sysinfo.cpp
   misc/time.cpp
@@ -147,27 +163,38 @@ set(SOURCES
   thread/tls.cpp
 )
 
-add_library(CoreClrPal
+add_library(coreclrpal
   STATIC
   ${SOURCES}
   ${PLATFORM_SOURCES}
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL Linux)
-target_link_libraries(CoreClrPal
-  pthread
-  rt
-  dl
-  unwind
-)
+  target_link_libraries(coreclrpal
+    pthread
+    rt
+    dl
+    unwind
+  )
 endif(CMAKE_SYSTEM_NAME STREQUAL Linux)
+
+if(CMAKE_SYSTEM_NAME STREQUAL FreeBSD)
+  find_library(UNWIND unwind)
+  find_library(INTL intl)
+  target_link_libraries(coreclrpal
+    pthread
+    rt
+    ${UNWIND}
+    ${INTL}
+  )
+endif(CMAKE_SYSTEM_NAME STREQUAL FreeBSD)
 
 if(CMAKE_SYSTEM_NAME STREQUAL Darwin)
   find_library(COREFOUNDATION CoreFoundation)
   find_library(CORESERVICES CoreServices)
   find_library(SECURITY Security)
   find_library(SYSTEM System)
-  target_link_libraries(CoreClrPal
+  target_link_libraries(coreclrpal
     ${COREFOUNDATION}
     ${CORESERVICES}
     ${SECURITY}
@@ -176,3 +203,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL Darwin)
 endif(CMAKE_SYSTEM_NAME STREQUAL Darwin)
 
 add_subdirectory(examples)
+
+# Install the static PAL library for VS
+install (TARGETS coreclrpal DESTINATION lib)
